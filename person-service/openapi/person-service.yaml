@@ -1,0 +1,230 @@
+openapi: 3.0.3
+info:
+  title: person-service API
+  description: |
+    Контракт сервиса доменных пользователей. person-service — источник доменной истины
+    о пользователе; его идентификатор `userUid` является сквозным идентификатором платформы.
+    Операции этого контракта не переименовываются без крайней необходимости.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8082
+    description: Локальный запуск
+tags:
+  - name: persons
+    description: Доменные пользователи
+paths:
+  /api/v1/persons/registration:
+    post:
+      tags: [persons]
+      operationId: registerPerson
+      summary: Создать доменного пользователя
+      description: Создаёт доменного пользователя и возвращает его `userUid`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PersonRegistrationRequest'
+            example:
+              email: user@example.com
+              firstName: Ivan
+              lastName: Ivanov
+      responses:
+        '201':
+          description: Пользователь создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonRegistrationResponse'
+              example:
+                userUid: 3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Пользователь с таким email уже существует
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                timestamp: '2026-06-08T10:15:30Z'
+                path: /api/v1/persons/registration
+                status: 409
+                error: CONFLICT
+                message: Пользователь с таким email уже существует
+                traceId: 803b448a0489f84084905d3093480352
+                details: []
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/persons/{userUid}:
+    get:
+      tags: [persons]
+      operationId: getPersonByUserUid
+      summary: Получить пользователя по доменному идентификатору
+      parameters:
+        - name: userUid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Пользователь найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonResponse'
+              example:
+                userUid: 3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e
+                email: user@example.com
+                firstName: Ivan
+                lastName: Ivanov
+                filled: false
+                createdAt: '2026-06-08T10:15:30Z'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/persons/by-email:
+    get:
+      tags: [persons]
+      operationId: getPersonByEmail
+      summary: Получить пользователя по email
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema:
+            type: string
+            format: email
+      responses:
+        '200':
+          description: Пользователь найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonResponse'
+              example:
+                userUid: 3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e
+                email: user@example.com
+                firstName: Ivan
+                lastName: Ivanov
+                filled: false
+                createdAt: '2026-06-08T10:15:30Z'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  responses:
+    BadRequest:
+      description: Некорректный запрос
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            timestamp: '2026-06-08T10:15:30Z'
+            path: /api/v1/persons/registration
+            status: 400
+            error: BAD_REQUEST
+            message: Ошибка валидации запроса
+            traceId: 803b448a0489f84084905d3093480352
+            details:
+              - 'email: должно иметь формат адреса электронной почты'
+    NotFound:
+      description: Пользователь не найден
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            timestamp: '2026-06-08T10:15:30Z'
+            path: /api/v1/persons/3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e
+            status: 404
+            error: NOT_FOUND
+            message: Пользователь не найден
+            traceId: 803b448a0489f84084905d3093480352
+            details: []
+    InternalError:
+      description: Внутренняя ошибка сервиса
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            timestamp: '2026-06-08T10:15:30Z'
+            path: /api/v1/persons/registration
+            status: 500
+            error: INTERNAL_SERVER_ERROR
+            message: Внутренняя ошибка сервиса
+            traceId: 803b448a0489f84084905d3093480352
+            details: []
+  schemas:
+    PersonRegistrationRequest:
+      type: object
+      required: [email, firstName, lastName]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 1024
+        firstName:
+          type: string
+          minLength: 1
+          maxLength: 64
+        lastName:
+          type: string
+          minLength: 1
+          maxLength: 64
+    PersonRegistrationResponse:
+      type: object
+      required: [userUid]
+      properties:
+        userUid:
+          type: string
+          format: uuid
+          description: Доменный идентификатор пользователя
+    PersonResponse:
+      type: object
+      required: [userUid, email, firstName, lastName, filled]
+      properties:
+        userUid:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        firstName:
+          type: string
+        lastName:
+          type: string
+        filled:
+          type: boolean
+          description: Заполнены ли индивидуальные данные пользователя
+        createdAt:
+          type: string
+          format: date-time
+    ErrorResponse:
+      type: object
+      description: Единая схема ошибки для всех сервисов платформы
+      required: [timestamp, path, status, error, message, traceId]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        path:
+          type: string
+        status:
+          type: integer
+        error:
+          type: string
+        message:
+          type: string
+        traceId:
+          type: string
+        details:
+          type: array
+          items:
+            type: string

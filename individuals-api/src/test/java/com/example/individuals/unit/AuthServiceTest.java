@@ -1,0 +1,237 @@
+package com.example.individuals.unit;
+
+import com.example.individuals.api.model.CurrentUserResponse;
+import com.example.individuals.api.model.LoginRequest;
+import com.example.individuals.api.model.RefreshTokenRequest;
+import com.example.individuals.api.model.RegistrationRequest;
+import com.example.individuals.api.model.TokenResponse;
+import com.example.individuals.error.EmailAlreadyExistsException;
+import com.example.individuals.error.ErrorCode;
+import com.example.individuals.error.ExternalServiceUnavailableException;
+import com.example.individuals.error.InconsistentRegistrationException;
+import com.example.individuals.error.InvalidCredentialsException;
+import com.example.individuals.error.InvalidRefreshTokenException;
+import com.example.individuals.error.PasswordMismatchException;
+import com.example.individuals.gateway.PersonGateway;
+import com.example.individuals.keycloak.KeycloakGateway;
+import com.example.individuals.keycloak.dto.KeycloakTokenResponse;
+import com.example.individuals.metrics.AuthMetrics;
+import com.example.individuals.service.AuthService;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class AuthServiceTest {
+
+    private static final String EMAIL = "user@example.com";
+    private static final String PASSWORD = "Str@ngPass!";
+    private static final UUID USER_UID = UUID.fromString("3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e");
+    private static final String KEYCLOAK_USER_ID = "6d4a6249-75d8-4b8d-aee8-c2f6ddafaa11";
+    private static final KeycloakTokenResponse TOKENS =
+            new KeycloakTokenResponse("access-token", "refresh-token", 300, "Bearer");
+
+    @Mock
+    private PersonGateway personGateway;
+    @Mock
+    private KeycloakGateway keycloakGateway;
+    @Mock
+    private JwtDecoder jwtDecoder;
+
+    private SimpleMeterRegistry meterRegistry;
+    private AuthService authService;
+
+    @BeforeEach
+    void setUp() {
+        meterRegistry = new SimpleMeterRegistry();
+        authService = new AuthService(personGateway, keycloakGateway, jwtDecoder, new AuthMetrics(meterRegistry));
+    }
+
+    @Test
+    void validRegistrationCallsPersonServiceThenKeycloakAndReturnsTokens() {
+        // UT-REG-001
+        when(personGateway.registerPerson(EMAIL, "Ivan", "Ivanov")).thenReturn(USER_UID);
+        when(keycloakGateway.createUser(EMAIL, "Ivan", "Ivanov", USER_UID)).thenReturn(KEYCLOAK_USER_ID);
+        when(keycloakGateway.login(EMAIL, PASSWORD)).thenReturn(TOKENS);
+
+        TokenResponse response = authService.register(registration(" User@Example.com ", PASSWORD, PASSWORD));
+
+        InOrder order = inOrder(personGateway, keycloakGateway);
+        order.verify(personGateway).registerPerson(EMAIL, "Ivan", "Ivanov");
+        order.verify(keycloakGateway).createUser(EMAIL, "Ivan", "Ivanov", USER_UID);
+        order.verify(keycloakGateway).resetPassword(KEYCLOAK_USER_ID, PASSWORD);
+        order.verify(keycloakGateway).login(EMAIL, PASSWORD);
+        order.verifyNoMoreInteractions();
+
+        assertThat(response.getUserId()).isEqualTo(USER_UID);
+        assertThat(response.getAccessToken()).isEqualTo("access-token");
+        assertThat(response.getRefreshToken()).isEqualTo("refresh-token");
+        assertThat(response.getExpiresIn()).isEqualTo(300);
+        assertThat(response.getTokenType()).isEqualTo("Bearer");
+        assertThat(counter("auth.registration")).isEqualTo(1);
+        assertThat(counter("auth.registration.success")).isEqualTo(1);
+        assertThat(counter("auth.registration.failure")).isZero();
+    }
+
+    @Test
+    void passwordMismatchIsRejectedWithoutExternalCalls() {
+        // UT-REG-002
+        assertThatThrownBy(() -> authService.register(registration(EMAIL, PASSWORD, "Other@Pass1")))
+                .isInstanceOf(PasswordMismatchException.class)
+                .satisfies(e -> assertThat(((PasswordMismatchException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
+
+        verifyNoInteractions(personGateway, keycloakGateway);
+        assertThat(counter("auth.registration.failure")).isEqualTo(1);
+    }
+
+    @Test
+    void emailConflictInPersonServiceDoesNotReachKeycloak() {
+        // UT-REG-003
+        when(personGateway.registerPerson(EMAIL, "Ivan", "Ivanov")).thenThrow(new EmailAlreadyExistsException());
+
+        assertThatThrownBy(() -> authService.register(registration(EMAIL, PASSWORD, PASSWORD)))
+                .isInstanceOf(EmailAlreadyExistsException.class)
+                .satisfies(e -> assertThat(((EmailAlreadyExistsException) e).getStatus()).isEqualTo(HttpStatus.CONFLICT));
+
+        verifyNoInteractions(keycloakGateway);
+        assertThat(counter("auth.registration.failure")).isEqualTo(1);
+    }
+
+    @Test
+    void keycloakFailureAfterDomainUserCreatedIsReportedAsInconsistentRegistration() {
+        // UT-REG-004
+        when(personGateway.registerPerson(EMAIL, "Ivan", "Ivanov")).thenReturn(USER_UID);
+        ExternalServiceUnavailableException keycloakDown = new ExternalServiceUnavailableException("keycloak", null);
+        when(keycloakGateway.createUser(EMAIL, "Ivan", "Ivanov", USER_UID)).thenThrow(keycloakDown);
+
+        assertThatThrownBy(() -> authService.register(registration(EMAIL, PASSWORD, PASSWORD)))
+                .isInstanceOfSatisfying(InconsistentRegistrationException.class, e -> {
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.BAD_GATEWAY);
+                    assertThat(e.getErrorCode()).isEqualTo(ErrorCode.REGISTRATION_INCONSISTENT);
+                    assertThat(e.getUserUid()).isEqualTo(USER_UID);
+                    assertThat(e.getDetails()).containsExactly("userUid: " + USER_UID);
+                    assertThat(e.getCause()).isSameAs(keycloakDown);
+                });
+        assertThat(counter("auth.registration.failure")).isEqualTo(1);
+        assertThat(counter("auth.registration.success")).isZero();
+    }
+
+    @Test
+    void successfulLoginReturnsTokensAndUserUidFromAccessToken() {
+        // UT-LOG-001
+        when(keycloakGateway.login(EMAIL, PASSWORD)).thenReturn(TOKENS);
+        when(jwtDecoder.decode("access-token")).thenReturn(jwt(Map.of("user_uid", USER_UID.toString())));
+
+        TokenResponse response = authService.login(new LoginRequest("USER@example.com", PASSWORD));
+
+        assertThat(response.getUserId()).isEqualTo(USER_UID);
+        assertThat(response.getAccessToken()).isEqualTo("access-token");
+        assertThat(response.getRefreshToken()).isEqualTo("refresh-token");
+        assertThat(counter("auth.login")).isEqualTo(1);
+        assertThat(counter("auth.login.failure")).isZero();
+    }
+
+    @Test
+    void wrongPasswordIsUnauthorized() {
+        // UT-LOG-002
+        when(keycloakGateway.login(EMAIL, "wrong")).thenThrow(new InvalidCredentialsException());
+
+        assertThatThrownBy(() -> authService.login(new LoginRequest(EMAIL, "wrong")))
+                .isInstanceOfSatisfying(InvalidCredentialsException.class,
+                        e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.UNAUTHORIZED));
+        assertThat(counter("auth.login")).isEqualTo(1);
+        assertThat(counter("auth.login.failure")).isEqualTo(1);
+    }
+
+    @Test
+    void refreshReturnsNewAccessToken() {
+        // UT-REF-001
+        KeycloakTokenResponse refreshed = new KeycloakTokenResponse("new-access-token", "new-refresh-token", 300, null);
+        when(keycloakGateway.refresh("refresh-token")).thenReturn(refreshed);
+        when(jwtDecoder.decode("new-access-token")).thenReturn(jwt(Map.of("user_uid", USER_UID.toString())));
+
+        TokenResponse response = authService.refresh(new RefreshTokenRequest("refresh-token"));
+
+        assertThat(response.getAccessToken()).isEqualTo("new-access-token");
+        assertThat(response.getRefreshToken()).isEqualTo("new-refresh-token");
+        assertThat(response.getUserId()).isEqualTo(USER_UID);
+        assertThat(response.getTokenType()).isEqualTo("Bearer");
+        assertThat(counter("auth.refresh")).isEqualTo(1);
+    }
+
+    @Test
+    void invalidRefreshTokenIsPropagated() {
+        when(keycloakGateway.refresh("expired")).thenThrow(new InvalidRefreshTokenException());
+
+        assertThatThrownBy(() -> authService.refresh(new RefreshTokenRequest("expired")))
+                .isInstanceOf(InvalidRefreshTokenException.class);
+    }
+
+    @Test
+    void loginWithTokenWithoutUserUidReturnsNullUserId() {
+        when(keycloakGateway.login(any(), any())).thenReturn(TOKENS);
+        when(jwtDecoder.decode("access-token")).thenReturn(jwt(Map.of("email", EMAIL)));
+
+        assertThat(authService.login(new LoginRequest(EMAIL, PASSWORD)).getUserId()).isNull();
+    }
+
+    @Test
+    void currentUserIsBuiltFromValidBearerToken() {
+        // UT-ME-001
+        Jwt jwt = jwt(Map.of(
+                "user_uid", USER_UID.toString(),
+                "email", EMAIL,
+                "given_name", "Ivan",
+                "family_name", "Ivanov",
+                "email_verified", false,
+                "realm_access", Map.of("roles", List.of("default-roles-payment-platform", "offline_access",
+                        "uma_authorization", "USER"))));
+
+        CurrentUserResponse me = authService.currentUser(jwt);
+
+        assertThat(me.getUserUid()).isEqualTo(USER_UID);
+        assertThat(me.getKeycloakUserId()).isEqualTo(KEYCLOAK_USER_ID);
+        assertThat(me.getEmail()).isEqualTo(EMAIL);
+        assertThat(me.getFirstName()).isEqualTo("Ivan");
+        assertThat(me.getLastName()).isEqualTo("Ivanov");
+        assertThat(me.getRoles()).containsExactly("USER");
+        assertThat(me.getEmailVerified()).isFalse();
+    }
+
+    private static RegistrationRequest registration(String email, String password, String confirmPassword) {
+        return new RegistrationRequest(email, password, confirmPassword, "Ivan", "Ivanov");
+    }
+
+    private static Jwt jwt(Map<String, Object> claims) {
+        Jwt.Builder builder = Jwt.withTokenValue("token")
+                .header("alg", "RS256")
+                .subject(KEYCLOAK_USER_ID)
+                .issuedAt(Instant.now())
+                .expiresAt(Instant.now().plusSeconds(300));
+        claims.forEach(builder::claim);
+        return builder.build();
+    }
+
+    private double counter(String name) {
+        return meterRegistry.get(name).counter().count();
+    }
+}

@@ -1,0 +1,24 @@
+# Общий каталог версий для всех модулей монорепозитория.
+# Корень репозитория не является Gradle-проектом: каждый модуль подключает этот файл
+# через versionCatalogs { create("libs") { from(files("../gradle/libs.versions.toml")) } }.
+
+[versions]
+spring-boot = "4.1.2"
+spring-dependency-management = "1.1.7"
+openapi-generator = "7.26.0"
+foojay = "1.0.0"
+person-client = "1.0.0"
+testcontainers-keycloak = "4.4.0"
+wiremock = "3.13.2"
+
+[libraries]
+spring-boot-bom = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "spring-boot" }
+person-client = { module = "com.example:person-client", version.ref = "person-client" }
+testcontainers-keycloak = { module = "com.github.dasniko:testcontainers-keycloak", version.ref = "testcontainers-keycloak" }
+wiremock-standalone = { module = "org.wiremock:wiremock-standalone", version.ref = "wiremock" }
+
+[plugins]
+spring-boot = { id = "org.springframework.boot", version.ref = "spring-boot" }
+spring-dependency-management = { id = "io.spring.dependency-management", version.ref = "spring-dependency-management" }
+openapi-generator = { id = "org.openapi.generator", version.ref = "openapi-generator" }
+foojay = { id = "org.gradle.toolchains.foojay-resolver-convention", version.ref = "foojay" }

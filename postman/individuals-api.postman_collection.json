@@ -1,0 +1,225 @@
+{
+  "info": {
+    "name": "individuals-api",
+    "description": "Ручная проверка сценариев individuals-api. Запуск стенда: см. README.md. Регистрация и вход сохраняют токены в переменные коллекции.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8081" },
+    { "key": "email", "value": "" },
+    { "key": "password", "value": "Str@ngPass!" },
+    { "key": "accessToken", "value": "" },
+    { "key": "refreshToken", "value": "" },
+    { "key": "userUid", "value": "" }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!pm.collectionVariables.get('email')) {",
+          "  pm.collectionVariables.set('email', 'user-' + Date.now() + '@example.com');",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Registration",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('201 Created', () => pm.response.to.have.status(201));",
+              "const body = pm.response.json();",
+              "pm.test('userId и токены', () => {",
+              "  pm.expect(body.userId).to.be.a('string');",
+              "  pm.expect(body.accessToken).to.be.a('string');",
+              "  pm.expect(body.tokenType).to.eql('Bearer');",
+              "});",
+              "pm.collectionVariables.set('userUid', body.userId);",
+              "pm.collectionVariables.set('accessToken', body.accessToken);",
+              "pm.collectionVariables.set('refreshToken', body.refreshToken);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/v1/auth/registration",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\",\n  \"confirmPassword\": \"{{password}}\",\n  \"firstName\": \"Ivan\",\n  \"lastName\": \"Ivanov\"\n}"
+        }
+      }
+    },
+    {
+      "name": "2. Login",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test('тот же userUid', () => pm.expect(body.userId).to.eql(pm.collectionVariables.get('userUid')));",
+              "pm.collectionVariables.set('accessToken', body.accessToken);",
+              "pm.collectionVariables.set('refreshToken', body.refreshToken);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/v1/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+        }
+      }
+    },
+    {
+      "name": "3. Refresh token",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.collectionVariables.set('accessToken', body.accessToken);",
+              "pm.collectionVariables.set('refreshToken', body.refreshToken);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/v1/auth/refresh-token",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+        }
+      }
+    },
+    {
+      "name": "4. Me",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test('userUid из токена', () => pm.expect(body.userUid).to.eql(pm.collectionVariables.get('userUid')));",
+              "pm.test('роль USER', () => pm.expect(body.roles).to.include('USER'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "auth": {
+          "type": "bearer",
+          "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+        },
+        "url": "{{baseUrl}}/api/v1/auth/me"
+      }
+    },
+    {
+      "name": "Errors",
+      "item": [
+        {
+          "name": "Registration: пароли не совпадают (400)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('400 PASSWORD_MISMATCH', () => {",
+            "  pm.response.to.have.status(400);",
+            "  pm.expect(pm.response.json().error).to.eql('PASSWORD_MISMATCH');",
+            "});"
+          ] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/v1/auth/registration",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"mismatch@example.com\",\n  \"password\": \"Str@ngPass!\",\n  \"confirmPassword\": \"Other@Pass1\",\n  \"firstName\": \"Ivan\",\n  \"lastName\": \"Ivanov\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Registration: email занят (409)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('409 CONFLICT', () => {",
+            "  pm.response.to.have.status(409);",
+            "  pm.expect(pm.response.json().error).to.eql('CONFLICT');",
+            "});"
+          ] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/v1/auth/registration",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"taken@example.com\",\n  \"password\": \"Str@ngPass!\",\n  \"confirmPassword\": \"Str@ngPass!\",\n  \"firstName\": \"Ivan\",\n  \"lastName\": \"Ivanov\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Login: неверный пароль (401)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('401 INVALID_CREDENTIALS', () => {",
+            "  pm.response.to.have.status(401);",
+            "  pm.expect(pm.response.json().error).to.eql('INVALID_CREDENTIALS');",
+            "});"
+          ] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/v1/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"wrong-password\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Me: без токена (401)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('401 UNAUTHORIZED', () => {",
+            "  pm.response.to.have.status(401);",
+            "  pm.expect(pm.response.json().error).to.eql('UNAUTHORIZED');",
+            "});"
+          ] } }],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/auth/me"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Actuator",
+      "item": [
+        {
+          "name": "Health",
+          "request": { "method": "GET", "url": "{{baseUrl}}/actuator/health" }
+        },
+        {
+          "name": "Prometheus",
+          "request": { "method": "GET", "url": "{{baseUrl}}/actuator/prometheus" }
+        }
+      ]
+    }
+  ]
+}

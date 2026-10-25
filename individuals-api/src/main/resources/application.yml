@@ -1,0 +1,75 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: individuals-api
+  http:
+    clients:
+      connect-timeout: 2s
+      read-timeout: 5s
+    serviceclient:
+      person-service:
+        base-url: ${PERSON_SERVICE_URL:http://localhost:8082}
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Ключи берутся по внутреннему адресу Keycloak, issuer проверяется по внешнему (тому, что в токене)
+          jwk-set-uri: ${app.keycloak.server-url}/realms/${app.keycloak.realm}/protocol/openid-connect/certs
+          issuer-uri: ${app.keycloak.issuer-uri}
+
+app:
+  keycloak:
+    server-url: ${KEYCLOAK_URL:http://localhost:8080}
+    issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8080/realms/payment-platform}
+    realm: payment-platform
+    client-id: individuals-api
+    client-secret: ${KEYCLOAK_CLIENT_SECRET:individuals-api-secret}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "health,info,prometheus"
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: individuals-api
+    distribution:
+      percentiles-histogram:
+        "[http.server.requests]": true
+        "[external.keycloak.requests]": true
+        "[external.person.service.requests]": true
+  observations:
+    enable:
+      # Спаны каждого фильтра Spring Security засоряют трассы; оставляем HTTP, клиентов и прикладной код
+      spring.security: false
+  tracing:
+    sampling:
+      probability: 1.0
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+  # Метрики забирает Prometheus, журналы — stdout: OTLP используется только для трасс
+  otlp:
+    metrics:
+      export:
+        enabled: false
+  logging:
+    export:
+      otlp:
+        enabled: false
+
+logging:
+  structured:
+    format:
+      console: ecs
+    ecs:
+      service:
+        name: individuals-api

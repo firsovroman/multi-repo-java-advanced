@@ -1,0 +1,127 @@
+# Локальная инфраструктура платформы и individuals-api.
+# Перед запуском соберите приложение: см. README.md («Быстрый старт»).
+name: multi-repo-java-advanced
+
+services:
+  keycloak-postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: keycloak
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1
+    command: start-dev --import-realm
+    depends_on:
+      keycloak-postgres:
+        condition: service_healthy
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: keycloak
+      KC_HEALTH_ENABLED: "true"
+      # Внешний адрес попадает в issuer токенов; individuals-api ходит в Keycloak по внутреннему keycloak:8080
+      KC_HOSTNAME: http://localhost:8080
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+    volumes:
+      - ./individuals-api/src/main/resources/realm/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '\"UP\"' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  # Заглушка person-service по контракту person-service/openapi/person-service.yaml
+  person-service-stub:
+    image: wiremock/wiremock:3.13.2
+    command: ["--disable-http2-plain", "--verbose"]
+    volumes:
+      - ./infra/wiremock:/home/wiremock:ro
+    ports:
+      - "8082:8080"
+
+  person-postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: person
+      POSTGRES_USER: person
+      POSTGRES_PASSWORD: person
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U person -d person"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Применяет миграции будущего person-service к person-postgres и завершается
+  person-migrations:
+    image: flyway/flyway:12.4.0
+    command: ["-url=jdbc:postgresql://person-postgres:5432/person", "-user=person", "-password=person",
+              "-schemas=person", "-locations=filesystem:/flyway/sql", "migrate"]
+    depends_on:
+      person-postgres:
+        condition: service_healthy
+    volumes:
+      - ./person-service/src/main/resources/db/migration:/flyway/sql:ro
+
+  individuals-api:
+    build:
+      context: ./individuals-api
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      person-service-stub:
+        condition: service_started
+      prometheus:
+        condition: service_started
+      tempo:
+        condition: service_started
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    ports:
+      - "8081:8081"
+
+  prometheus:
+    image: prom/prometheus:v3.7.0
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+  tempo:
+    image: grafana/tempo:2.9.0
+    command: ["-config.file=/etc/tempo/tempo.yml"]
+    volumes:
+      - ./infra/tempo/tempo.yml:/etc/tempo/tempo.yml:ro
+    ports:
+      - "3200:3200"
+      - "4318:4318"
+
+  grafana:
+    image: grafana/grafana:12.2.0
+    depends_on:
+      - prometheus
+      - tempo
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"

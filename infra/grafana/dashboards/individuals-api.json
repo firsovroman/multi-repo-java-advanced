@@ -1,0 +1,113 @@
+{
+  "uid": "individuals-api",
+  "title": "individuals-api",
+  "tags": ["payment-platform", "auth"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Регистрации (всего)",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(auth_registration_total{application=\"individuals-api\"})", "legendFormat": "попытки" },
+        { "refId": "B", "expr": "sum(auth_registration_success_total{application=\"individuals-api\"})", "legendFormat": "успешно" },
+        { "refId": "C", "expr": "sum(auth_registration_failure_total{application=\"individuals-api\"})", "legendFormat": "ошибки" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Входы (всего)",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(auth_login_total{application=\"individuals-api\"})", "legendFormat": "попытки" },
+        { "refId": "B", "expr": "sum(auth_login_failure_total{application=\"individuals-api\"})", "legendFormat": "ошибки" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Обновления токена (всего)",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(auth_refresh_total{application=\"individuals-api\"})", "legendFormat": "refresh" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Несогласованные регистрации",
+      "description": "Ответы 502 REGISTRATION_INCONSISTENT: доменный пользователь создан, а учётная запись в Keycloak — нет",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(http_server_requests_seconds_count{application=\"individuals-api\", uri=\"/api/v1/auth/registration\", status=\"502\"}) or vector(0)", "legendFormat": "502" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Регистрации и входы, в минуту",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(auth_registration_success_total{application=\"individuals-api\"}[1m])) * 60", "legendFormat": "регистрации: успешно" },
+        { "refId": "B", "expr": "sum(rate(auth_registration_failure_total{application=\"individuals-api\"}[1m])) * 60", "legendFormat": "регистрации: ошибки" },
+        { "refId": "C", "expr": "sum(rate(auth_login_total{application=\"individuals-api\"}[1m])) * 60", "legendFormat": "входы" },
+        { "refId": "D", "expr": "sum(rate(auth_login_failure_total{application=\"individuals-api\"}[1m])) * 60", "legendFormat": "входы: ошибки" },
+        { "refId": "E", "expr": "sum(rate(auth_refresh_total{application=\"individuals-api\"}[1m])) * 60", "legendFormat": "refresh" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "HTTP-запросы по коду ответа, в секунду",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (uri, status) (rate(http_server_requests_seconds_count{application=\"individuals-api\", uri=~\"/api/.*\"}[1m]))", "legendFormat": "{{uri}} {{status}}" }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Keycloak: p95 длительности запросов",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(external_keycloak_requests_seconds_bucket{application=\"individuals-api\"}[5m])))", "legendFormat": "{{operation}}" }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "person-service: p95 длительности запросов",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(external_person_service_requests_seconds_bucket{application=\"individuals-api\"}[5m])))", "legendFormat": "{{operation}}" }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "individuals-api: p95 длительности HTTP-запросов",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, uri) (rate(http_server_requests_seconds_bucket{application=\"individuals-api\", uri=~\"/api/.*\"}[5m])))", "legendFormat": "{{uri}}" }
+      ]
+    }
+  ]
+}

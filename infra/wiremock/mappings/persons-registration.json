@@ -1,0 +1,75 @@
+{
+  "mappings": [
+    {
+      "name": "registration: email уже занят",
+      "priority": 1,
+      "request": {
+        "method": "POST",
+        "url": "/api/v1/persons/registration",
+        "bodyPatterns": [
+          { "matchesJsonPath": "$[?(@.email == 'taken@example.com')]" }
+        ]
+      },
+      "response": {
+        "status": 409,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "timestamp": "{{now}}",
+          "path": "/api/v1/persons/registration",
+          "status": 409,
+          "error": "CONFLICT",
+          "message": "Пользователь с таким email уже существует",
+          "traceId": "{{request.headers.traceparent}}",
+          "details": []
+        },
+        "transformers": ["response-template"]
+      }
+    },
+    {
+      "name": "registration: новый доменный пользователь",
+      "priority": 5,
+      "request": {
+        "method": "POST",
+        "url": "/api/v1/persons/registration",
+        "headers": {
+          "Content-Type": { "contains": "application/json" }
+        },
+        "bodyPatterns": [
+          { "matchesJsonPath": "$.email" },
+          { "matchesJsonPath": "$.firstName" },
+          { "matchesJsonPath": "$.lastName" }
+        ]
+      },
+      "response": {
+        "status": 201,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "userUid": "{{randomValue type='UUID'}}"
+        },
+        "transformers": ["response-template"]
+      }
+    },
+    {
+      "name": "registration: некорректный запрос",
+      "priority": 10,
+      "request": {
+        "method": "POST",
+        "url": "/api/v1/persons/registration"
+      },
+      "response": {
+        "status": 400,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "timestamp": "{{now}}",
+          "path": "/api/v1/persons/registration",
+          "status": 400,
+          "error": "BAD_REQUEST",
+          "message": "Ошибка валидации запроса",
+          "traceId": "",
+          "details": []
+        },
+        "transformers": ["response-template"]
+      }
+    }
+  ]
+}
