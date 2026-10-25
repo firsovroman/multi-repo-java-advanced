@@ -1,5 +1,5 @@
 # Образ собирается из заранее собранного jar: ./gradlew bootJar
-# (person-client пока берётся из локального Maven-репозитория, а не из Nexus)
+# (person-client при этом берётся из Nexus; внутри образа Nexus не нужен)
 FROM eclipse-temurin:25-jre
 
 RUN groupadd --system app && useradd --system --gid app app

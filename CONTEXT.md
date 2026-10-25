@@ -78,4 +78,5 @@ Micrometer + OpenTelemetry, Prometheus, Tempo, Grafana, Testcontainers 2, WireMo
 
 - JDK HttpClient пробует апгрейд на HTTP/2 (h2c); WireMock рвёт такой поток, поэтому в заглушке и тестах h2c отключён
   (`--disable-http2-plain`, `http2PlainDisabled(true)`).
-- Nexus пока не подключён: person-client публикуется в `mavenLocal`, переключение на Nexus делается конфигурацией (см. README).
+- person-client публикуется в Nexus (`maven-releases`, локально http://localhost:8091); адрес и учётные данные — только
+  в `~/.gradle/gradle.properties` или переменных окружения, не в репозитории (см. README).

@@ -32,8 +32,8 @@ Payment Platform — модуль 1: individuals-api.
 ## Быстрый старт
 
 ```bash
-# 1. Опубликовать person-client (пока в локальный Maven-репозиторий, см. «Nexus»)
-cd person-client && ./gradlew publishToMavenLocal && cd ..
+# 1. Опубликовать person-client в Nexus (см. «Nexus»; без Nexus — ./gradlew publishToMavenLocal)
+cd person-client && ./gradlew publish && cd ..
 
 # 2. Собрать individuals-api (Dockerfile копирует готовый jar)
 cd individuals-api && ./gradlew bootJar && cd ..
@@ -135,17 +135,18 @@ cd individuals-api && ./gradlew check   # openApiValidate + unit + integration +
 
 ## Nexus
 
-Сейчас person-client публикуется в локальный Maven-репозиторий (`publishToMavenLocal`), а individuals-api читает его
-через `mavenLocal()`. Публикация в Nexus включается только конфигурацией, код менять не нужно:
+person-client публикуется в Nexus (локально — http://localhost:8091, репозиторий `maven-releases`; Nexus запускается
+отдельным compose вне этого репозитория). Репозиторий подключается только конфигурацией, код менять не нужно:
 
 ```bash
 # ~/.gradle/gradle.properties или переменные окружения NEXUS_URL / NEXUS_USERNAME / NEXUS_PASSWORD
-nexusUrl=http://nexus.local:8081/repository/maven-releases/
-nexusUsername=...
+nexusUrl=http://localhost:8091/repository/maven-releases/
+nexusUsername=admin
 nexusPassword=...
 
 cd person-client && ./gradlew publish
 ```
 
-Если `nexusUrl` задан, individuals-api тоже подключает этот репозиторий. Нерешённый пункт модуля: поднять Nexus
-(локально в compose или корпоративный) и выполнить публикацию.
+Если `nexusUrl` задан, individuals-api берёт person-client из Nexus (`mavenLocal()` остаётся запасным вариантом
+для `publishToMavenLocal`). В `maven-releases` повторная публикация той же версии запрещена: после изменения
+контракта поднимите версию `person-client` в `gradle/libs.versions.toml`.
