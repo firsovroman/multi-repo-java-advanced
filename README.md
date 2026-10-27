@@ -21,6 +21,8 @@ Payment Platform — модуль 1: individuals-api.
 | `individuals-api/src/main/resources/realm/realm-export.json` | realm Keycloak `payment-platform` |
 | `infra/` | Prometheus, Tempo, Grafana (provisioning + дашборд), заглушка person-service на WireMock |
 | `postman/individuals-api.postman_collection.json` | ручная проверка сценариев |
+| `insomnia/individuals-api.insomnia.yaml` | то же для Insomnia (Import → файл) |
+| `insomnia/person-service.insomnia.yaml` | проверка контракта person-service в Insomnia (на стенде — заглушка WireMock, порт 8082) |
 | `docker-compose.yml` | локальный стенд |
 
 ## Требования

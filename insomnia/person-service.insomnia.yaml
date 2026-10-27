@@ -1,0 +1,153 @@
+type: collection.insomnia.rest/5.0
+name: person-service
+meta:
+  id: wrk_person_service
+  created: 1761436800000
+  modified: 1761436800000
+  description: "Ручная проверка контракта person-service (person-service/openapi/person-service.yaml). На локальном стенде на порту 8082 отвечает заглушка WireMock (infra/wiremock). Регистрация сохраняет userUid в переменные окружения."
+collection:
+  - name: 1. Registration
+    meta:
+      id: req_person_registration
+      created: 1761436800000
+      modified: 1761436800000
+      sortKey: -1000
+    method: POST
+    url: "{{ _.baseUrl }}/api/v1/persons/registration"
+    headers:
+      - name: Content-Type
+        value: application/json
+    body:
+      mimeType: application/json
+      text: |-
+        {
+          "email": "{{ _.email }}",
+          "firstName": "Ivan",
+          "lastName": "Ivanov"
+        }
+    scripts:
+      preRequest: |-
+        if (!insomnia.baseEnvironment.get('email')) {
+          insomnia.baseEnvironment.set('email', 'person-' + Date.now() + '@example.com');
+        }
+      afterResponse: |-
+        insomnia.test('201 Created', () => insomnia.expect(insomnia.response.code).to.eql(201));
+        const body = insomnia.response.json();
+        insomnia.test('userUid', () => insomnia.expect(body.userUid).to.be.a('string'));
+        insomnia.baseEnvironment.set('userUid', body.userUid);
+  - name: 2. Get by userUid
+    meta:
+      id: req_person_get_by_uid
+      created: 1761436800000
+      modified: 1761436800000
+      sortKey: -900
+    method: GET
+    url: "{{ _.baseUrl }}/api/v1/persons/{{ _.userUid }}"
+    scripts:
+      afterResponse: |-
+        insomnia.test('200 OK', () => insomnia.expect(insomnia.response.code).to.eql(200));
+        const body = insomnia.response.json();
+        insomnia.test('тот же userUid', () => insomnia.expect(body.userUid).to.eql(insomnia.baseEnvironment.get('userUid')));
+        insomnia.test('обязательные поля', () => {
+          insomnia.expect(body.email).to.be.a('string');
+          insomnia.expect(body.firstName).to.be.a('string');
+          insomnia.expect(body.lastName).to.be.a('string');
+          insomnia.expect(body.filled).to.be.a('boolean');
+        });
+  - name: 3. Get by email
+    meta:
+      id: req_person_get_by_email
+      created: 1761436800000
+      modified: 1761436800000
+      sortKey: -800
+    method: GET
+    url: "{{ _.baseUrl }}/api/v1/persons/by-email"
+    parameters:
+      - name: email
+        value: "{{ _.email }}"
+    scripts:
+      afterResponse: |-
+        insomnia.test('200 OK', () => insomnia.expect(insomnia.response.code).to.eql(200));
+        const body = insomnia.response.json();
+        insomnia.test('тот же email', () => insomnia.expect(body.email).to.eql(insomnia.baseEnvironment.get('email')));
+        insomnia.test('userUid', () => insomnia.expect(body.userUid).to.be.a('string'));
+  - name: Errors
+    meta:
+      id: fld_person_errors
+      created: 1761436800000
+      modified: 1761436800000
+      sortKey: -700
+    children:
+      - name: "Registration: нет обязательных полей (400)"
+        meta:
+          id: req_person_err_bad_request
+          created: 1761436800000
+          modified: 1761436800000
+          sortKey: -1000
+        method: POST
+        url: "{{ _.baseUrl }}/api/v1/persons/registration"
+        headers:
+          - name: Content-Type
+            value: application/json
+        body:
+          mimeType: application/json
+          text: |-
+            {
+              "email": "bad-request@example.com"
+            }
+        scripts:
+          afterResponse: |-
+            insomnia.test('400 BAD_REQUEST', () => {
+              insomnia.expect(insomnia.response.code).to.eql(400);
+              insomnia.expect(insomnia.response.json().error).to.eql('BAD_REQUEST');
+            });
+      - name: "Registration: email занят (409)"
+        meta:
+          id: req_person_err_conflict
+          created: 1761436800000
+          modified: 1761436800000
+          sortKey: -900
+        method: POST
+        url: "{{ _.baseUrl }}/api/v1/persons/registration"
+        headers:
+          - name: Content-Type
+            value: application/json
+        body:
+          mimeType: application/json
+          text: |-
+            {
+              "email": "taken@example.com",
+              "firstName": "Ivan",
+              "lastName": "Ivanov"
+            }
+        scripts:
+          afterResponse: |-
+            insomnia.test('409 CONFLICT', () => {
+              insomnia.expect(insomnia.response.code).to.eql(409);
+              insomnia.expect(insomnia.response.json().error).to.eql('CONFLICT');
+            });
+      - name: "Get by userUid: не найден (404, только реальный сервис)"
+        meta:
+          id: req_person_err_not_found
+          created: 1761436800000
+          modified: 1761436800000
+          sortKey: -800
+        method: GET
+        url: "{{ _.baseUrl }}/api/v1/persons/00000000-0000-0000-0000-000000000000"
+        scripts:
+          afterResponse: |-
+            insomnia.test('404 NOT_FOUND', () => {
+              insomnia.expect(insomnia.response.code).to.eql(404);
+              insomnia.expect(insomnia.response.json().error).to.eql('NOT_FOUND');
+            });
+environments:
+  name: Base Environment
+  meta:
+    id: env_person_service_base
+    created: 1761436800000
+    modified: 1761436800000
+    isPrivate: false
+  data:
+    baseUrl: http://localhost:8082
+    email: ""
+    userUid: ""
