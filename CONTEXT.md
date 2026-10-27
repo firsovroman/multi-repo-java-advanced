@@ -53,10 +53,12 @@
 | `error` | исключения с HTTP-статусом и `ErrorCode`, `GlobalExceptionHandler`, `ErrorResponseFactory` (traceId) |
 | `security` | resource server (JWT Keycloak), JSON-ответы 401/403, разбор claims |
 | `metrics` | счётчики `auth.*`, таймеры `external.*.requests` |
-| `logging` | MDC-поля `userUid`/`errorCode`, журнал запросов |
-| `config` | HTTP-клиенты (`@ImportHttpServices`, RestClient для Keycloak), `KeycloakProperties` |
+| `logging` | `LogContext` (поля `userUid`/`errorCode` запроса: атрибут exchange + Reactor Context), журнал запросов (`WebFilter`) |
+| `config` | HTTP-клиенты (`@ImportHttpServices` с `WEB_CLIENT`, WebClient для Keycloak), `KeycloakProperties` |
 
-HTTP-клиенты строятся на автоконфигурированном `RestClient.Builder`, поэтому получают метрики и передачу trace context.
+Стек реактивный: Spring WebFlux на Reactor Netty, весь путь запроса — `Mono` без блокировок. HTTP-клиенты строятся
+на автоконфигурированном `WebClient.Builder`, поэтому получают метрики и передачу trace context;
+`PersonsApi` из person-client (с 2.0.0) возвращает `Mono`. Resource server — `SecurityWebFilterChain` и `ReactiveJwtDecoder`.
 
 ## Keycloak
 
@@ -70,8 +72,8 @@ mapper атрибута `user_uid` в access/id token и userinfo, realm-рол�
 
 ## Технологии
 
-Java 25, Spring Boot 4.1 (Spring Framework 7, Jackson 3), Gradle 9 (Kotlin DSL, общий version catalog),
-OpenAPI Generator 7.26 (`spring` / `spring-http-interface`, `useSpringBoot4`, `useJackson3`), Keycloak 26.8,
+Java 25, Spring Boot 4.1 (Spring Framework 7, WebFlux, Jackson 3), Gradle 9 (Kotlin DSL, общий version catalog),
+OpenAPI Generator 7.26 (`spring` / `spring-http-interface`, `useSpringBoot4`, `useJackson3`, `reactive`), Keycloak 26.8,
 Micrometer + OpenTelemetry, Prometheus, Tempo, Grafana, Testcontainers 2, WireMock 3, JaCoCo, Flyway, PostgreSQL 18.
 
 ## Известные особенности
@@ -80,3 +82,7 @@ Micrometer + OpenTelemetry, Prometheus, Tempo, Grafana, Testcontainers 2, WireMo
   (`--disable-http2-plain`, `http2PlainDisabled(true)`).
 - person-client публикуется в Nexus (`maven-releases`, локально http://localhost:8091); адрес и учётные данные — только
   в `~/.gradle/gradle.properties` или переменных окружения, не в репозитории (см. README).
+- Сжатие ответов в WebClient выключено (`HttpClientsConfig`): распаковка gzip в Netty 4.2 на JDK 25 падает
+  с `UnsupportedOperationException: ByteBuffer derived from closeable shared sessions not supported`.
+- traceId/spanId в MDC восстанавливаются из Reactor Context (`spring.reactor.context-propagation=auto`); traceId в
+  `ErrorResponse` берётся из наблюдения HTTP-запроса, привязанного к exchange.

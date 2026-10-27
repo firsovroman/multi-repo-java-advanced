@@ -3,8 +3,7 @@ package com.example.individuals.metrics;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import org.springframework.stereotype.Component;
-
-import java.util.function.Supplier;
+import reactor.core.publisher.Mono;
 
 /**
  * Таймеры вызовов внешних систем: {@code external_keycloak_requests_seconds}
@@ -22,19 +21,22 @@ public class ExternalCallMetrics {
         this.registry = registry;
     }
 
-    public <T> T record(String timerName, String operation, Supplier<T> call) {
-        Timer.Sample sample = Timer.start(registry);
-        String outcome = "success";
-        try {
-            return call.get();
-        } catch (RuntimeException e) {
-            outcome = "error";
-            throw e;
-        } finally {
-            sample.stop(Timer.builder(timerName)
-                    .tag("operation", operation)
-                    .tag("outcome", outcome)
-                    .register(registry));
-        }
+    /**
+     * Замер начинается при подписке и заканчивается завершением или ошибкой вызова.
+     */
+    public <T> Mono<T> record(String timerName, String operation, Mono<T> call) {
+        return Mono.defer(() -> {
+            Timer.Sample sample = Timer.start(registry);
+            return call
+                    .doOnSuccess(result -> stop(sample, timerName, operation, "success"))
+                    .doOnError(e -> stop(sample, timerName, operation, "error"));
+        });
+    }
+
+    private void stop(Timer.Sample sample, String timerName, String operation, String outcome) {
+        sample.stop(Timer.builder(timerName)
+                .tag("operation", operation)
+                .tag("outcome", outcome)
+                .register(registry));
     }
 }

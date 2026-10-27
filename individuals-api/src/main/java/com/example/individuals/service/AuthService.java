@@ -5,7 +5,6 @@ import com.example.individuals.api.model.LoginRequest;
 import com.example.individuals.api.model.RefreshTokenRequest;
 import com.example.individuals.api.model.RegistrationRequest;
 import com.example.individuals.api.model.TokenResponse;
-import com.example.individuals.error.ErrorCode;
 import com.example.individuals.error.InconsistentRegistrationException;
 import com.example.individuals.error.PasswordMismatchException;
 import com.example.individuals.gateway.PersonGateway;
@@ -17,12 +16,12 @@ import com.example.individuals.security.KeycloakJwtClaims;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Mono;
 
 import java.util.Locale;
 import java.util.UUID;
-import java.util.function.Supplier;
 
 /**
  * Оркестрация регистрации и аутентификации.
@@ -38,10 +37,10 @@ public class AuthService {
 
     private final PersonGateway personGateway;
     private final KeycloakGateway keycloakGateway;
-    private final JwtDecoder jwtDecoder;
+    private final ReactiveJwtDecoder jwtDecoder;
     private final AuthMetrics metrics;
 
-    public AuthService(PersonGateway personGateway, KeycloakGateway keycloakGateway, JwtDecoder jwtDecoder,
+    public AuthService(PersonGateway personGateway, KeycloakGateway keycloakGateway, ReactiveJwtDecoder jwtDecoder,
                        AuthMetrics metrics) {
         this.personGateway = personGateway;
         this.keycloakGateway = keycloakGateway;
@@ -49,31 +48,35 @@ public class AuthService {
         this.metrics = metrics;
     }
 
-    public TokenResponse register(RegistrationRequest request) {
-        metrics.registrationAttempt();
-        TokenResponse response = countingFailures(() -> doRegister(request), metrics::registrationFailure);
-        metrics.registrationSuccess();
-        return response;
+    public Mono<TokenResponse> register(RegistrationRequest request) {
+        return Mono.defer(() -> {
+                    metrics.registrationAttempt();
+                    return doRegister(request);
+                })
+                .doOnSuccess(response -> metrics.registrationSuccess())
+                .doOnError(e -> metrics.registrationFailure());
     }
 
-    public TokenResponse login(LoginRequest request) {
-        metrics.loginAttempt();
-        return countingFailures(() -> {
-            KeycloakTokenResponse tokens = keycloakGateway.login(normalizeEmail(request.getEmail()), request.getPassword());
-            return toTokenResponse(userUidFrom(tokens), tokens);
-        }, metrics::loginFailure);
+    public Mono<TokenResponse> login(LoginRequest request) {
+        return Mono.defer(() -> {
+                    metrics.loginAttempt();
+                    return keycloakGateway.login(normalizeEmail(request.getEmail()), request.getPassword());
+                })
+                .flatMap(this::toTokenResponse)
+                .doOnError(e -> metrics.loginFailure());
     }
 
-    public TokenResponse refresh(RefreshTokenRequest request) {
-        metrics.refresh();
-        KeycloakTokenResponse tokens = keycloakGateway.refresh(request.getRefreshToken());
-        return toTokenResponse(userUidFrom(tokens), tokens);
+    public Mono<TokenResponse> refresh(RefreshTokenRequest request) {
+        return Mono.defer(() -> {
+                    metrics.refresh();
+                    return keycloakGateway.refresh(request.getRefreshToken());
+                })
+                .flatMap(this::toTokenResponse);
     }
 
-    public CurrentUserResponse currentUser(Jwt jwt) {
+    public Mono<CurrentUserResponse> currentUser(Jwt jwt) {
         UUID userUid = KeycloakJwtClaims.userUid(jwt);
-        LogContext.putUserUid(userUid);
-        return new CurrentUserResponse()
+        CurrentUserResponse response = new CurrentUserResponse()
                 .userUid(userUid)
                 .keycloakUserId(jwt.getSubject())
                 .email(jwt.getClaimAsString("email"))
@@ -81,41 +84,47 @@ public class AuthService {
                 .lastName(jwt.getClaimAsString("family_name"))
                 .roles(KeycloakJwtClaims.realmRoles(jwt))
                 .emailVerified(Boolean.TRUE.equals(jwt.getClaimAsBoolean("email_verified")));
+        return LogContext.putUserUid(userUid).thenReturn(response);
     }
 
-    private TokenResponse doRegister(RegistrationRequest request) {
+    private Mono<TokenResponse> doRegister(RegistrationRequest request) {
         if (!request.getPassword().equals(request.getConfirmPassword())) {
-            throw new PasswordMismatchException();
+            return Mono.error(new PasswordMismatchException());
         }
         String email = normalizeEmail(request.getEmail());
-
-        UUID userUid = personGateway.registerPerson(email, request.getFirstName(), request.getLastName());
-        LogContext.putUserUid(userUid);
-
-        try {
-            String keycloakUserId = keycloakGateway.createUser(email, request.getFirstName(), request.getLastName(), userUid);
-            keycloakGateway.resetPassword(keycloakUserId, request.getPassword());
-            KeycloakTokenResponse tokens = keycloakGateway.login(email, request.getPassword());
-            log.atInfo().addKeyValue("keycloakUserId", keycloakUserId).log("User registered");
-            return toTokenResponse(userUid, tokens);
-        } catch (RuntimeException e) {
-            LogContext.putErrorCode(ErrorCode.REGISTRATION_INCONSISTENT);
-            log.atError()
-                    .setCause(e)
-                    .addKeyValue("event", "INCONSISTENT_REGISTRATION")
-                    .addKeyValue("email", email)
-                    .log("Domain user {} created in person-service, but Keycloak registration failed", userUid);
-            throw new InconsistentRegistrationException(userUid, e);
-        }
+        return personGateway.registerPerson(email, request.getFirstName(), request.getLastName())
+                .flatMap(userUid -> LogContext.putUserUid(userUid)
+                        .then(registerInKeycloak(email, request, userUid)));
     }
 
-    private UUID userUidFrom(KeycloakTokenResponse tokens) {
-        UUID userUid = KeycloakJwtClaims.userUid(jwtDecoder.decode(tokens.accessToken()));
-        LogContext.putUserUid(userUid);
-        if (userUid == null) {
-            log.warn("Access token has no {} claim", KeycloakJwtClaims.USER_UID);
-        }
-        return userUid;
+    private Mono<TokenResponse> registerInKeycloak(String email, RegistrationRequest request, UUID userUid) {
+        return keycloakGateway.createUser(email, request.getFirstName(), request.getLastName(), userUid)
+                .flatMap(keycloakUserId -> keycloakGateway.resetPassword(keycloakUserId, request.getPassword())
+                        .then(Mono.defer(() -> keycloakGateway.login(email, request.getPassword())))
+                        .doOnNext(tokens -> log.atInfo()
+                                .addKeyValue(LogContext.USER_UID, userUid)
+                                .addKeyValue("keycloakUserId", keycloakUserId)
+                                .log("User registered")))
+                .map(tokens -> toTokenResponse(userUid, tokens))
+                .onErrorMap(e -> {
+                    log.atError()
+                            .setCause(e)
+                            .addKeyValue("event", "INCONSISTENT_REGISTRATION")
+                            .addKeyValue(LogContext.USER_UID, userUid)
+                            .addKeyValue("email", email)
+                            .log("Domain user {} created in person-service, but Keycloak registration failed", userUid);
+                    return new InconsistentRegistrationException(userUid, e);
+                });
+    }
+
+    private Mono<TokenResponse> toTokenResponse(KeycloakTokenResponse tokens) {
+        return jwtDecoder.decode(tokens.accessToken()).flatMap(jwt -> {
+            UUID userUid = KeycloakJwtClaims.userUid(jwt);
+            if (userUid == null) {
+                log.warn("Access token has no {} claim", KeycloakJwtClaims.USER_UID);
+            }
+            return LogContext.putUserUid(userUid).thenReturn(toTokenResponse(userUid, tokens));
+        });
     }
 
     private static TokenResponse toTokenResponse(UUID userUid, KeycloakTokenResponse tokens) {
@@ -125,14 +134,5 @@ public class AuthService {
 
     private static String normalizeEmail(String email) {
         return email.trim().toLowerCase(Locale.ROOT);
-    }
-
-    private static <T> T countingFailures(Supplier<T> action, Runnable onFailure) {
-        try {
-            return action.get();
-        } catch (RuntimeException e) {
-            onFailure.run();
-            throw e;
-        }
     }
 }

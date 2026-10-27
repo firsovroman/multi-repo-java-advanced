@@ -45,8 +45,8 @@ val generatedDir = layout.buildDirectory.dir("generated/openapi")
 dependencies {
     implementation(libs.person.client)
 
-    implementation("org.springframework.boot:spring-boot-starter-webmvc")
-    implementation("org.springframework.boot:spring-boot-starter-restclient")
+    implementation("org.springframework.boot:spring-boot-starter-webflux")
+    implementation("org.springframework.boot:spring-boot-starter-webclient")
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-security-oauth2-resource-server")
     implementation("org.springframework.boot:spring-boot-starter-validation")
@@ -56,9 +56,9 @@ dependencies {
     runtimeOnly("io.micrometer:micrometer-registry-prometheus")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
-    testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
+    testImplementation("org.springframework.boot:spring-boot-starter-webflux-test")
     testImplementation("org.springframework.boot:spring-boot-starter-security-test")
-    testImplementation("org.springframework.boot:spring-boot-starter-restclient-test")
+    testImplementation("io.projectreactor:reactor-test")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.testcontainers:testcontainers-junit-jupiter")
     testImplementation("io.opentelemetry:opentelemetry-sdk-testing")
@@ -84,6 +84,7 @@ openApiGenerate {
         "skipDefaultInterface" to "true",
         "useSpringBoot4" to "true",
         "useJackson3" to "true",
+        "reactive" to "true",
         "useTags" to "true",
         "useBeanValidation" to "true",
         "openApiNullable" to "false",

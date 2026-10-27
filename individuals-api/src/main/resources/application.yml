@@ -4,6 +4,9 @@ server:
 spring:
   application:
     name: individuals-api
+  # traceId/spanId в MDC восстанавливаются из Reactor Context при смене потока
+  reactor:
+    context-propagation: auto
   http:
     clients:
       connect-timeout: 2s

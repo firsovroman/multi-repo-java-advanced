@@ -4,25 +4,26 @@ import com.example.individuals.api.model.ErrorResponse;
 import com.example.individuals.error.ErrorCode;
 import com.example.individuals.error.ErrorResponseFactory;
 import com.example.individuals.logging.LogContext;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
-import org.springframework.security.web.AuthenticationEntryPoint;
-import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.security.web.server.ServerAuthenticationEntryPoint;
+import org.springframework.security.web.server.authorization.ServerAccessDeniedHandler;
 import org.springframework.stereotype.Component;
+import org.springframework.web.server.ServerWebExchange;
+import reactor.core.publisher.Mono;
 import tools.jackson.databind.json.JsonMapper;
 
-import java.io.IOException;
 import java.util.List;
 
 /**
  * Ответы 401/403 из Spring Security в формате {@link ErrorResponse}.
  */
 @Component
-public class JsonSecurityErrorHandler implements AuthenticationEntryPoint, AccessDeniedHandler {
+public class JsonSecurityErrorHandler implements ServerAuthenticationEntryPoint, ServerAccessDeniedHandler {
 
     private final ErrorResponseFactory errorResponseFactory;
     private final JsonMapper jsonMapper;
@@ -33,27 +34,25 @@ public class JsonSecurityErrorHandler implements AuthenticationEntryPoint, Acces
     }
 
     @Override
-    public void commence(HttpServletRequest request, HttpServletResponse response, AuthenticationException ex)
-            throws IOException {
-        write(request, response, HttpStatus.UNAUTHORIZED, ErrorCode.UNAUTHORIZED, "Требуется аутентификация");
+    public Mono<Void> commence(ServerWebExchange exchange, AuthenticationException ex) {
+        return write(exchange, HttpStatus.UNAUTHORIZED, ErrorCode.UNAUTHORIZED, "Требуется аутентификация");
     }
 
     @Override
-    public void handle(HttpServletRequest request, HttpServletResponse response, AccessDeniedException ex)
-            throws IOException {
-        write(request, response, HttpStatus.FORBIDDEN, ErrorCode.FORBIDDEN, "Доступ запрещён");
+    public Mono<Void> handle(ServerWebExchange exchange, AccessDeniedException ex) {
+        return write(exchange, HttpStatus.FORBIDDEN, ErrorCode.FORBIDDEN, "Доступ запрещён");
     }
 
-    private void write(HttpServletRequest request, HttpServletResponse response, HttpStatus status, ErrorCode code,
-                       String message) throws IOException {
-        LogContext.putErrorCode(code);
-        ErrorResponse body = errorResponseFactory.create(status, code.name(), message, request.getRequestURI(), List.of());
-        response.setStatus(status.value());
-        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        response.setCharacterEncoding("UTF-8");
+    private Mono<Void> write(ServerWebExchange exchange, HttpStatus status, ErrorCode code, String message) {
+        LogContext.putErrorCode(exchange, code);
+        ErrorResponse body = errorResponseFactory.create(exchange, status, code.name(), message, List.of());
+        ServerHttpResponse response = exchange.getResponse();
+        response.setStatusCode(status);
+        response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
         if (status == HttpStatus.UNAUTHORIZED) {
-            response.setHeader("WWW-Authenticate", "Bearer");
+            response.getHeaders().set(HttpHeaders.WWW_AUTHENTICATE, "Bearer");
         }
-        jsonMapper.writeValue(response.getOutputStream(), body);
+        return response.writeWith(Mono.fromSupplier(
+                () -> response.bufferFactory().wrap(jsonMapper.writeValueAsBytes(body))));
     }
 }

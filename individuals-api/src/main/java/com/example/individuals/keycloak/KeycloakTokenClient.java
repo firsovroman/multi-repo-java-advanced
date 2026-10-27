@@ -11,8 +11,10 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
-import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.RestClient;
+import org.springframework.web.reactive.function.BodyInserters;
+import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.core.publisher.Mono;
 
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -25,18 +27,18 @@ public class KeycloakTokenClient {
 
     private static final String TOKEN_PATH = "/realms/{realm}/protocol/openid-connect/token";
 
-    private final RestClient restClient;
+    private final WebClient webClient;
     private final KeycloakProperties properties;
     private final KeycloakCalls calls;
 
-    public KeycloakTokenClient(@Qualifier("keycloakRestClient") RestClient restClient, KeycloakProperties properties,
+    public KeycloakTokenClient(@Qualifier("keycloakWebClient") WebClient webClient, KeycloakProperties properties,
                                KeycloakCalls calls) {
-        this.restClient = restClient;
+        this.webClient = webClient;
         this.properties = properties;
         this.calls = calls;
     }
 
-    public KeycloakTokenResponse password(String username, String password) {
+    public Mono<KeycloakTokenResponse> password(String username, String password) {
         MultiValueMap<String, String> form = clientForm("password");
         form.add("username", username);
         form.add("password", password);
@@ -44,13 +46,13 @@ public class KeycloakTokenClient {
         return requestToken("password_grant", form, rejectedAs(InvalidCredentialsException::new));
     }
 
-    public KeycloakTokenResponse refresh(String refreshToken) {
+    public Mono<KeycloakTokenResponse> refresh(String refreshToken) {
         MultiValueMap<String, String> form = clientForm("refresh_token");
         form.add("refresh_token", refreshToken);
         return requestToken("refresh_token", form, rejectedAs(InvalidRefreshTokenException::new));
     }
 
-    public KeycloakTokenResponse clientCredentials(String clientId, String clientSecret) {
+    public Mono<KeycloakTokenResponse> clientCredentials(String clientId, String clientSecret) {
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("grant_type", "client_credentials");
         form.add("client_id", clientId);
@@ -58,14 +60,16 @@ public class KeycloakTokenClient {
         return requestToken("admin_token", form, e -> new ExternalServiceException(KeycloakCalls.SERVICE, e));
     }
 
-    private KeycloakTokenResponse requestToken(String operation, MultiValueMap<String, String> form,
-                                               Function<HttpClientErrorException, RuntimeException> onClientError) {
-        return calls.execute(operation, () -> restClient.post()
-                .uri(TOKEN_PATH, properties.realm())
-                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                .body(form)
-                .retrieve()
-                .body(KeycloakTokenResponse.class), onClientError);
+    private Mono<KeycloakTokenResponse> requestToken(String operation, MultiValueMap<String, String> form,
+                                                     Function<WebClientResponseException, RuntimeException> onClientError) {
+        return calls.execute(operation, webClient.post()
+                        .uri(TOKEN_PATH, properties.realm())
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .body(BodyInserters.fromFormData(form))
+                        .retrieve()
+                        .bodyToMono(KeycloakTokenResponse.class), onClientError)
+                .switchIfEmpty(Mono.error(() -> new ExternalServiceException(KeycloakCalls.SERVICE,
+                        new IllegalStateException("Keycloak returned empty token response"))));
     }
 
     private MultiValueMap<String, String> clientForm(String grantType) {
@@ -80,7 +84,7 @@ public class KeycloakTokenClient {
      * Keycloak отвечает 401 на неверные учётные данные и 400 (invalid_grant) на недействительный refresh token
      * или неактивную учётную запись — для клиента это одинаково «отказ в аутентификации».
      */
-    private static Function<HttpClientErrorException, RuntimeException> rejectedAs(
+    private static Function<WebClientResponseException, RuntimeException> rejectedAs(
             Supplier<RuntimeException> rejection) {
         return e -> e.getStatusCode().isSameCodeAs(HttpStatus.UNAUTHORIZED) || e.getStatusCode().isSameCodeAs(HttpStatus.BAD_REQUEST)
                 ? rejection.get()

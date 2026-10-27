@@ -26,7 +26,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
+import reactor.core.publisher.Mono;
+import reactor.test.StepVerifier;
 
 import java.time.Instant;
 import java.util.List;
@@ -34,7 +36,6 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -55,7 +56,7 @@ class AuthServiceTest {
     @Mock
     private KeycloakGateway keycloakGateway;
     @Mock
-    private JwtDecoder jwtDecoder;
+    private ReactiveJwtDecoder jwtDecoder;
 
     private SimpleMeterRegistry meterRegistry;
     private AuthService authService;
@@ -69,11 +70,12 @@ class AuthServiceTest {
     @Test
     void validRegistrationCallsPersonServiceThenKeycloakAndReturnsTokens() {
         // UT-REG-001
-        when(personGateway.registerPerson(EMAIL, "Ivan", "Ivanov")).thenReturn(USER_UID);
-        when(keycloakGateway.createUser(EMAIL, "Ivan", "Ivanov", USER_UID)).thenReturn(KEYCLOAK_USER_ID);
-        when(keycloakGateway.login(EMAIL, PASSWORD)).thenReturn(TOKENS);
+        when(personGateway.registerPerson(EMAIL, "Ivan", "Ivanov")).thenReturn(Mono.just(USER_UID));
+        when(keycloakGateway.createUser(EMAIL, "Ivan", "Ivanov", USER_UID)).thenReturn(Mono.just(KEYCLOAK_USER_ID));
+        when(keycloakGateway.resetPassword(KEYCLOAK_USER_ID, PASSWORD)).thenReturn(Mono.empty());
+        when(keycloakGateway.login(EMAIL, PASSWORD)).thenReturn(Mono.just(TOKENS));
 
-        TokenResponse response = authService.register(registration(" User@Example.com ", PASSWORD, PASSWORD));
+        TokenResponse response = authService.register(registration(" User@Example.com ", PASSWORD, PASSWORD)).block();
 
         InOrder order = inOrder(personGateway, keycloakGateway);
         order.verify(personGateway).registerPerson(EMAIL, "Ivan", "Ivanov");
@@ -82,6 +84,7 @@ class AuthServiceTest {
         order.verify(keycloakGateway).login(EMAIL, PASSWORD);
         order.verifyNoMoreInteractions();
 
+        assertThat(response).isNotNull();
         assertThat(response.getUserId()).isEqualTo(USER_UID);
         assertThat(response.getAccessToken()).isEqualTo("access-token");
         assertThat(response.getRefreshToken()).isEqualTo("refresh-token");
@@ -93,11 +96,20 @@ class AuthServiceTest {
     }
 
     @Test
+    void registrationIsLazyUntilSubscribed() {
+        authService.register(registration(EMAIL, PASSWORD, PASSWORD));
+
+        verifyNoInteractions(personGateway, keycloakGateway);
+        assertThat(counter("auth.registration")).isZero();
+    }
+
+    @Test
     void passwordMismatchIsRejectedWithoutExternalCalls() {
         // UT-REG-002
-        assertThatThrownBy(() -> authService.register(registration(EMAIL, PASSWORD, "Other@Pass1")))
-                .isInstanceOf(PasswordMismatchException.class)
-                .satisfies(e -> assertThat(((PasswordMismatchException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST));
+        StepVerifier.create(authService.register(registration(EMAIL, PASSWORD, "Other@Pass1")))
+                .expectErrorSatisfies(e -> assertThat(e).isInstanceOfSatisfying(PasswordMismatchException.class,
+                        ex -> assertThat(ex.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST)))
+                .verify();
 
         verifyNoInteractions(personGateway, keycloakGateway);
         assertThat(counter("auth.registration.failure")).isEqualTo(1);
@@ -106,11 +118,12 @@ class AuthServiceTest {
     @Test
     void emailConflictInPersonServiceDoesNotReachKeycloak() {
         // UT-REG-003
-        when(personGateway.registerPerson(EMAIL, "Ivan", "Ivanov")).thenThrow(new EmailAlreadyExistsException());
+        when(personGateway.registerPerson(EMAIL, "Ivan", "Ivanov")).thenReturn(Mono.error(new EmailAlreadyExistsException()));
 
-        assertThatThrownBy(() -> authService.register(registration(EMAIL, PASSWORD, PASSWORD)))
-                .isInstanceOf(EmailAlreadyExistsException.class)
-                .satisfies(e -> assertThat(((EmailAlreadyExistsException) e).getStatus()).isEqualTo(HttpStatus.CONFLICT));
+        StepVerifier.create(authService.register(registration(EMAIL, PASSWORD, PASSWORD)))
+                .expectErrorSatisfies(e -> assertThat(e).isInstanceOfSatisfying(EmailAlreadyExistsException.class,
+                        ex -> assertThat(ex.getStatus()).isEqualTo(HttpStatus.CONFLICT)))
+                .verify();
 
         verifyNoInteractions(keycloakGateway);
         assertThat(counter("auth.registration.failure")).isEqualTo(1);
@@ -119,18 +132,19 @@ class AuthServiceTest {
     @Test
     void keycloakFailureAfterDomainUserCreatedIsReportedAsInconsistentRegistration() {
         // UT-REG-004
-        when(personGateway.registerPerson(EMAIL, "Ivan", "Ivanov")).thenReturn(USER_UID);
+        when(personGateway.registerPerson(EMAIL, "Ivan", "Ivanov")).thenReturn(Mono.just(USER_UID));
         ExternalServiceUnavailableException keycloakDown = new ExternalServiceUnavailableException("keycloak", null);
-        when(keycloakGateway.createUser(EMAIL, "Ivan", "Ivanov", USER_UID)).thenThrow(keycloakDown);
+        when(keycloakGateway.createUser(EMAIL, "Ivan", "Ivanov", USER_UID)).thenReturn(Mono.error(keycloakDown));
 
-        assertThatThrownBy(() -> authService.register(registration(EMAIL, PASSWORD, PASSWORD)))
-                .isInstanceOfSatisfying(InconsistentRegistrationException.class, e -> {
+        StepVerifier.create(authService.register(registration(EMAIL, PASSWORD, PASSWORD)))
+                .expectErrorSatisfies(error -> assertThat(error).isInstanceOfSatisfying(InconsistentRegistrationException.class, e -> {
                     assertThat(e.getStatus()).isEqualTo(HttpStatus.BAD_GATEWAY);
                     assertThat(e.getErrorCode()).isEqualTo(ErrorCode.REGISTRATION_INCONSISTENT);
                     assertThat(e.getUserUid()).isEqualTo(USER_UID);
                     assertThat(e.getDetails()).containsExactly("userUid: " + USER_UID);
                     assertThat(e.getCause()).isSameAs(keycloakDown);
-                });
+                }))
+                .verify();
         assertThat(counter("auth.registration.failure")).isEqualTo(1);
         assertThat(counter("auth.registration.success")).isZero();
     }
@@ -138,14 +152,16 @@ class AuthServiceTest {
     @Test
     void successfulLoginReturnsTokensAndUserUidFromAccessToken() {
         // UT-LOG-001
-        when(keycloakGateway.login(EMAIL, PASSWORD)).thenReturn(TOKENS);
-        when(jwtDecoder.decode("access-token")).thenReturn(jwt(Map.of("user_uid", USER_UID.toString())));
+        when(keycloakGateway.login(EMAIL, PASSWORD)).thenReturn(Mono.just(TOKENS));
+        when(jwtDecoder.decode("access-token")).thenReturn(Mono.just(jwt(Map.of("user_uid", USER_UID.toString()))));
 
-        TokenResponse response = authService.login(new LoginRequest("USER@example.com", PASSWORD));
-
-        assertThat(response.getUserId()).isEqualTo(USER_UID);
-        assertThat(response.getAccessToken()).isEqualTo("access-token");
-        assertThat(response.getRefreshToken()).isEqualTo("refresh-token");
+        StepVerifier.create(authService.login(new LoginRequest("USER@example.com", PASSWORD)))
+                .assertNext(response -> {
+                    assertThat(response.getUserId()).isEqualTo(USER_UID);
+                    assertThat(response.getAccessToken()).isEqualTo("access-token");
+                    assertThat(response.getRefreshToken()).isEqualTo("refresh-token");
+                })
+                .verifyComplete();
         assertThat(counter("auth.login")).isEqualTo(1);
         assertThat(counter("auth.login.failure")).isZero();
     }
@@ -153,11 +169,12 @@ class AuthServiceTest {
     @Test
     void wrongPasswordIsUnauthorized() {
         // UT-LOG-002
-        when(keycloakGateway.login(EMAIL, "wrong")).thenThrow(new InvalidCredentialsException());
+        when(keycloakGateway.login(EMAIL, "wrong")).thenReturn(Mono.error(new InvalidCredentialsException()));
 
-        assertThatThrownBy(() -> authService.login(new LoginRequest(EMAIL, "wrong")))
-                .isInstanceOfSatisfying(InvalidCredentialsException.class,
-                        e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.UNAUTHORIZED));
+        StepVerifier.create(authService.login(new LoginRequest(EMAIL, "wrong")))
+                .expectErrorSatisfies(e -> assertThat(e).isInstanceOfSatisfying(InvalidCredentialsException.class,
+                        ex -> assertThat(ex.getStatus()).isEqualTo(HttpStatus.UNAUTHORIZED)))
+                .verify();
         assertThat(counter("auth.login")).isEqualTo(1);
         assertThat(counter("auth.login.failure")).isEqualTo(1);
     }
@@ -166,32 +183,37 @@ class AuthServiceTest {
     void refreshReturnsNewAccessToken() {
         // UT-REF-001
         KeycloakTokenResponse refreshed = new KeycloakTokenResponse("new-access-token", "new-refresh-token", 300, null);
-        when(keycloakGateway.refresh("refresh-token")).thenReturn(refreshed);
-        when(jwtDecoder.decode("new-access-token")).thenReturn(jwt(Map.of("user_uid", USER_UID.toString())));
+        when(keycloakGateway.refresh("refresh-token")).thenReturn(Mono.just(refreshed));
+        when(jwtDecoder.decode("new-access-token")).thenReturn(Mono.just(jwt(Map.of("user_uid", USER_UID.toString()))));
 
-        TokenResponse response = authService.refresh(new RefreshTokenRequest("refresh-token"));
-
-        assertThat(response.getAccessToken()).isEqualTo("new-access-token");
-        assertThat(response.getRefreshToken()).isEqualTo("new-refresh-token");
-        assertThat(response.getUserId()).isEqualTo(USER_UID);
-        assertThat(response.getTokenType()).isEqualTo("Bearer");
+        StepVerifier.create(authService.refresh(new RefreshTokenRequest("refresh-token")))
+                .assertNext(response -> {
+                    assertThat(response.getAccessToken()).isEqualTo("new-access-token");
+                    assertThat(response.getRefreshToken()).isEqualTo("new-refresh-token");
+                    assertThat(response.getUserId()).isEqualTo(USER_UID);
+                    assertThat(response.getTokenType()).isEqualTo("Bearer");
+                })
+                .verifyComplete();
         assertThat(counter("auth.refresh")).isEqualTo(1);
     }
 
     @Test
     void invalidRefreshTokenIsPropagated() {
-        when(keycloakGateway.refresh("expired")).thenThrow(new InvalidRefreshTokenException());
+        when(keycloakGateway.refresh("expired")).thenReturn(Mono.error(new InvalidRefreshTokenException()));
 
-        assertThatThrownBy(() -> authService.refresh(new RefreshTokenRequest("expired")))
-                .isInstanceOf(InvalidRefreshTokenException.class);
+        StepVerifier.create(authService.refresh(new RefreshTokenRequest("expired")))
+                .expectError(InvalidRefreshTokenException.class)
+                .verify();
     }
 
     @Test
     void loginWithTokenWithoutUserUidReturnsNullUserId() {
-        when(keycloakGateway.login(any(), any())).thenReturn(TOKENS);
-        when(jwtDecoder.decode("access-token")).thenReturn(jwt(Map.of("email", EMAIL)));
+        when(keycloakGateway.login(any(), any())).thenReturn(Mono.just(TOKENS));
+        when(jwtDecoder.decode("access-token")).thenReturn(Mono.just(jwt(Map.of("email", EMAIL))));
 
-        assertThat(authService.login(new LoginRequest(EMAIL, PASSWORD)).getUserId()).isNull();
+        StepVerifier.create(authService.login(new LoginRequest(EMAIL, PASSWORD)))
+                .assertNext(response -> assertThat(response.getUserId()).isNull())
+                .verifyComplete();
     }
 
     @Test
@@ -206,8 +228,9 @@ class AuthServiceTest {
                 "realm_access", Map.of("roles", List.of("default-roles-payment-platform", "offline_access",
                         "uma_authorization", "USER"))));
 
-        CurrentUserResponse me = authService.currentUser(jwt);
+        CurrentUserResponse me = authService.currentUser(jwt).block();
 
+        assertThat(me).isNotNull();
         assertThat(me.getUserUid()).isEqualTo(USER_UID);
         assertThat(me.getKeycloakUserId()).isEqualTo(KEYCLOAK_USER_ID);
         assertThat(me.getEmail()).isEqualTo(EMAIL);

@@ -14,15 +14,19 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
-import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.HttpServerErrorException;
-import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.core.publisher.Mono;
+import reactor.test.StepVerifier;
 
+import java.net.ConnectException;
+import java.net.URI;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
@@ -44,56 +48,68 @@ class PersonGatewayTest {
     @Test
     void registerPersonReturnsUserUidAndRecordsTimer() {
         UUID userUid = UUID.randomUUID();
-        when(personsApi.registerPerson(new PersonRegistrationRequest("user@example.com", "Ivan", "Ivanov")))
-                .thenReturn(new PersonRegistrationResponse(userUid));
+        PersonRegistrationRequest expected = new PersonRegistrationRequest("user@example.com", "Ivan", "Ivanov");
+        when(personsApi.registerPerson(any())).thenAnswer(invocation -> invocation.<Mono<PersonRegistrationRequest>>getArgument(0)
+                .filter(expected::equals)
+                .map(request -> new PersonRegistrationResponse(userUid)));
 
-        assertThat(gateway.registerPerson("user@example.com", "Ivan", "Ivanov")).isEqualTo(userUid);
+        StepVerifier.create(gateway.registerPerson("user@example.com", "Ivan", "Ivanov"))
+                .expectNext(userUid)
+                .verifyComplete();
         assertThat(meterRegistry.get(ExternalCallMetrics.PERSON_SERVICE)
                 .tag("operation", "register_person").tag("outcome", "success").timer().count()).isEqualTo(1);
     }
 
     @Test
     void conflictIsTranslatedToEmailAlreadyExists() {
-        when(personsApi.registerPerson(any()))
-                .thenThrow(HttpClientErrorException.create(HttpStatus.CONFLICT, "Conflict", null, null, null));
+        when(personsApi.registerPerson(any())).thenReturn(Mono.error(responseError(HttpStatus.CONFLICT)));
 
-        assertThatThrownBy(() -> gateway.registerPerson("user@example.com", "Ivan", "Ivanov"))
-                .isInstanceOf(EmailAlreadyExistsException.class);
+        StepVerifier.create(gateway.registerPerson("user@example.com", "Ivan", "Ivanov"))
+                .expectError(EmailAlreadyExistsException.class)
+                .verify();
         assertThat(meterRegistry.get(ExternalCallMetrics.PERSON_SERVICE).tag("outcome", "error").timer().count())
                 .isEqualTo(1);
     }
 
     @Test
     void networkErrorIsTranslatedToUnavailable() {
-        when(personsApi.registerPerson(any())).thenThrow(new ResourceAccessException("Connection refused"));
+        when(personsApi.registerPerson(any())).thenReturn(Mono.error(new WebClientRequestException(
+                new ConnectException("Connection refused"), HttpMethod.POST, URI.create("http://person-service"),
+                HttpHeaders.EMPTY)));
 
-        assertThatThrownBy(() -> gateway.registerPerson("user@example.com", "Ivan", "Ivanov"))
-                .isInstanceOf(ExternalServiceUnavailableException.class);
+        StepVerifier.create(gateway.registerPerson("user@example.com", "Ivan", "Ivanov"))
+                .expectError(ExternalServiceUnavailableException.class)
+                .verify();
     }
 
     @Test
     void serverErrorIsTranslatedToUnavailable() {
-        when(personsApi.registerPerson(any()))
-                .thenThrow(HttpServerErrorException.create(HttpStatus.INTERNAL_SERVER_ERROR, "Error", null, null, null));
+        when(personsApi.registerPerson(any())).thenReturn(Mono.error(responseError(HttpStatus.INTERNAL_SERVER_ERROR)));
 
-        assertThatThrownBy(() -> gateway.registerPerson("user@example.com", "Ivan", "Ivanov"))
-                .isInstanceOf(ExternalServiceUnavailableException.class);
+        StepVerifier.create(gateway.registerPerson("user@example.com", "Ivan", "Ivanov"))
+                .expectError(ExternalServiceUnavailableException.class)
+                .verify();
     }
 
     @Test
     void unexpectedClientErrorIsTranslatedToExternalServiceError() {
-        when(personsApi.registerPerson(any()))
-                .thenThrow(HttpClientErrorException.create(HttpStatus.BAD_REQUEST, "Bad Request", null, null, null));
+        when(personsApi.registerPerson(any())).thenReturn(Mono.error(responseError(HttpStatus.BAD_REQUEST)));
 
-        assertThatThrownBy(() -> gateway.registerPerson("user@example.com", "Ivan", "Ivanov"))
-                .isInstanceOf(ExternalServiceException.class);
+        StepVerifier.create(gateway.registerPerson("user@example.com", "Ivan", "Ivanov"))
+                .expectError(ExternalServiceException.class)
+                .verify();
     }
 
     @Test
     void responseWithoutUserUidIsExternalServiceError() {
-        when(personsApi.registerPerson(any())).thenReturn(new PersonRegistrationResponse());
+        when(personsApi.registerPerson(any())).thenReturn(Mono.just(new PersonRegistrationResponse()));
 
-        assertThatThrownBy(() -> gateway.registerPerson("user@example.com", "Ivan", "Ivanov"))
-                .isInstanceOf(ExternalServiceException.class);
+        StepVerifier.create(gateway.registerPerson("user@example.com", "Ivan", "Ivanov"))
+                .expectError(ExternalServiceException.class)
+                .verify();
+    }
+
+    private static WebClientResponseException responseError(HttpStatus status) {
+        return WebClientResponseException.create(status, status.getReasonPhrase(), HttpHeaders.EMPTY, new byte[0], null, null);
     }
 }

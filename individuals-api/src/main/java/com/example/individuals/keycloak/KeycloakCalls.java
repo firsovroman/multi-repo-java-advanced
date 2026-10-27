@@ -4,12 +4,11 @@ import com.example.individuals.error.ExternalServiceException;
 import com.example.individuals.error.ExternalServiceUnavailableException;
 import com.example.individuals.metrics.ExternalCallMetrics;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.HttpServerErrorException;
-import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.core.publisher.Mono;
 
 import java.util.function.Function;
-import java.util.function.Supplier;
 
 /**
  * Общая обёртка вызовов Keycloak: таймер {@code external.keycloak.requests} и перевод
@@ -27,18 +26,21 @@ public class KeycloakCalls {
         this.metrics = metrics;
     }
 
-    <T> T execute(String operation, Supplier<T> call) {
+    <T> Mono<T> execute(String operation, Mono<T> call) {
         return execute(operation, call, e -> new ExternalServiceException(SERVICE, e));
     }
 
-    <T> T execute(String operation, Supplier<T> call,
-                  Function<HttpClientErrorException, RuntimeException> onClientError) {
-        try {
-            return metrics.record(ExternalCallMetrics.KEYCLOAK, operation, call);
-        } catch (ResourceAccessException | HttpServerErrorException e) {
-            throw new ExternalServiceUnavailableException(SERVICE, e);
-        } catch (HttpClientErrorException e) {
-            throw onClientError.apply(e);
-        }
+    <T> Mono<T> execute(String operation, Mono<T> call,
+                        Function<WebClientResponseException, RuntimeException> onClientError) {
+        return metrics.record(ExternalCallMetrics.KEYCLOAK, operation, call)
+                .onErrorMap(WebClientRequestException.class, e -> new ExternalServiceUnavailableException(SERVICE, e))
+                .onErrorMap(WebClientResponseException.class, e -> {
+                    if (e.getStatusCode().is4xxClientError()) {
+                        return onClientError.apply(e);
+                    }
+                    return e.getStatusCode().is5xxServerError()
+                            ? new ExternalServiceUnavailableException(SERVICE, e)
+                            : new ExternalServiceException(SERVICE, e);
+                });
     }
 }

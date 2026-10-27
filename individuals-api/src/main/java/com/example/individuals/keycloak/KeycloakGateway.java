@@ -6,9 +6,9 @@ import com.example.individuals.keycloak.dto.KeycloakTokenResponse;
 import com.example.individuals.keycloak.dto.KeycloakUserRepresentation;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClient;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 
 import java.net.URI;
 import java.util.List;
@@ -27,15 +27,15 @@ public class KeycloakGateway {
     private static final String USERS_PATH = "/admin/realms/{realm}/users";
     private static final String RESET_PASSWORD_PATH = "/admin/realms/{realm}/users/{id}/reset-password";
 
-    private final RestClient restClient;
+    private final WebClient webClient;
     private final KeycloakProperties properties;
     private final KeycloakAdminTokenProvider adminTokenProvider;
     private final KeycloakTokenClient tokenClient;
     private final KeycloakCalls calls;
 
-    public KeycloakGateway(@Qualifier("keycloakRestClient") RestClient restClient, KeycloakProperties properties,
+    public KeycloakGateway(@Qualifier("keycloakWebClient") WebClient webClient, KeycloakProperties properties,
                            KeycloakAdminTokenProvider adminTokenProvider, KeycloakTokenClient tokenClient, KeycloakCalls calls) {
-        this.restClient = restClient;
+        this.webClient = webClient;
         this.properties = properties;
         this.adminTokenProvider = adminTokenProvider;
         this.tokenClient = tokenClient;
@@ -45,34 +45,35 @@ public class KeycloakGateway {
     /**
      * Создаёт учётную запись с атрибутом {@code user_uid} и возвращает её идентификатор в Keycloak.
      */
-    public String createUser(String email, String firstName, String lastName, UUID userUid) {
+    public Mono<String> createUser(String email, String firstName, String lastName, UUID userUid) {
         KeycloakUserRepresentation user = new KeycloakUserRepresentation(null, email, email, firstName, lastName,
                 true, false, Map.of(USER_UID_ATTRIBUTE, List.of(userUid.toString())));
-        ResponseEntity<Void> response = calls.execute("create_user", () -> restClient.post()
-                .uri(USERS_PATH, properties.realm())
-                .headers(headers -> headers.setBearerAuth(adminTokenProvider.getToken()))
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(user)
-                .retrieve()
-                .toBodilessEntity());
-        return userIdFromLocation(response.getHeaders().getLocation());
+        return calls.execute("create_user", adminTokenProvider.getToken().flatMap(token -> webClient.post()
+                        .uri(USERS_PATH, properties.realm())
+                        .headers(headers -> headers.setBearerAuth(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .bodyValue(user)
+                        .retrieve()
+                        .toBodilessEntity()))
+                .map(response -> userIdFromLocation(response.getHeaders().getLocation()));
     }
 
-    public void resetPassword(String keycloakUserId, String password) {
-        calls.execute("reset_password", () -> restClient.put()
-                .uri(RESET_PASSWORD_PATH, properties.realm(), keycloakUserId)
-                .headers(headers -> headers.setBearerAuth(adminTokenProvider.getToken()))
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(KeycloakCredentialRepresentation.password(password))
-                .retrieve()
-                .toBodilessEntity());
+    public Mono<Void> resetPassword(String keycloakUserId, String password) {
+        return calls.execute("reset_password", adminTokenProvider.getToken().flatMap(token -> webClient.put()
+                        .uri(RESET_PASSWORD_PATH, properties.realm(), keycloakUserId)
+                        .headers(headers -> headers.setBearerAuth(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .bodyValue(KeycloakCredentialRepresentation.password(password))
+                        .retrieve()
+                        .toBodilessEntity()))
+                .then();
     }
 
-    public KeycloakTokenResponse login(String email, String password) {
+    public Mono<KeycloakTokenResponse> login(String email, String password) {
         return tokenClient.password(email, password);
     }
 
-    public KeycloakTokenResponse refresh(String refreshToken) {
+    public Mono<KeycloakTokenResponse> refresh(String refreshToken) {
         return tokenClient.refresh(refreshToken);
     }
 

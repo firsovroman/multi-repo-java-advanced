@@ -8,13 +8,11 @@ import com.example.person.client.api.PersonsApi;
 import com.example.person.client.model.PersonRegistrationRequest;
 import com.example.person.client.model.PersonRegistrationResponse;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.HttpServerErrorException;
-import org.springframework.web.client.ResourceAccessException;
-import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.core.publisher.Mono;
 
 import java.util.UUID;
-import java.util.function.Supplier;
 
 /**
  * Шлюз к person-service — источнику доменной истины о пользователе.
@@ -34,27 +32,25 @@ public class PersonGateway {
 
     /**
      * Создаёт доменного пользователя и возвращает его {@code userUid}.
-     *
-     * @throws EmailAlreadyExistsException если пользователь с таким email уже есть
+     * Ошибка {@link EmailAlreadyExistsException} — если пользователь с таким email уже есть.
      */
-    public UUID registerPerson(String email, String firstName, String lastName) {
+    public Mono<UUID> registerPerson(String email, String firstName, String lastName) {
         PersonRegistrationRequest request = new PersonRegistrationRequest(email, firstName, lastName);
-        PersonRegistrationResponse response = call("register_person", () -> personsApi.registerPerson(request));
-        if (response == null || response.getUserUid() == null) {
-            throw new ExternalServiceException(SERVICE, new IllegalStateException("person-service returned no userUid"));
-        }
-        return response.getUserUid();
+        return call("register_person", Mono.defer(() -> personsApi.registerPerson(Mono.just(request))))
+                .mapNotNull(PersonRegistrationResponse::getUserUid)
+                .switchIfEmpty(Mono.error(() -> new ExternalServiceException(SERVICE,
+                        new IllegalStateException("person-service returned no userUid"))));
     }
 
-    private <T> T call(String operation, Supplier<T> call) {
-        try {
-            return metrics.record(ExternalCallMetrics.PERSON_SERVICE, operation, call);
-        } catch (HttpClientErrorException.Conflict e) {
-            throw new EmailAlreadyExistsException();
-        } catch (ResourceAccessException | HttpServerErrorException e) {
-            throw new ExternalServiceUnavailableException(SERVICE, e);
-        } catch (RestClientResponseException e) {
-            throw new ExternalServiceException(SERVICE, e);
-        }
+    private <T> Mono<T> call(String operation, Mono<T> call) {
+        return metrics.record(ExternalCallMetrics.PERSON_SERVICE, operation, call)
+                .onErrorMap(WebClientResponseException.Conflict.class, e -> new EmailAlreadyExistsException())
+                .onErrorMap(PersonGateway::isUnavailable, e -> new ExternalServiceUnavailableException(SERVICE, e))
+                .onErrorMap(WebClientResponseException.class, e -> new ExternalServiceException(SERVICE, e));
+    }
+
+    private static boolean isUnavailable(Throwable e) {
+        return e instanceof WebClientRequestException
+                || e instanceof WebClientResponseException response && response.getStatusCode().is5xxServerError();
     }
 }

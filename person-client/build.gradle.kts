@@ -26,6 +26,7 @@ dependencies {
     api(platform(libs.spring.boot.bom))
     api("org.springframework:spring-web")
     api("org.springframework:spring-context")
+    api("io.projectreactor:reactor-core")
     api("jakarta.validation:jakarta.validation-api")
     api("jakarta.annotation:jakarta.annotation-api")
     api("com.fasterxml.jackson.core:jackson-annotations")
@@ -46,6 +47,8 @@ openApiGenerate {
     globalProperties = mapOf("apis" to "", "models" to "")
     configOptions = mapOf(
         "useSpringBoot4" to "true",
+        // Методы возвращают Mono/Flux: клиент рассчитан на WebClient
+        "reactive" to "true",
         "useJackson3" to "true",
         "useTags" to "true",
         "useResponseEntity" to "false",
