@@ -136,8 +136,9 @@ tasks.jacocoTestReport {
 }
 
 tasks.jacocoTestCoverageVerification {
-    dependsOn(tasks.test)
-    classDirectories.setFrom(files(classDirectories.files.map { fileTree(it) { include(coveredClasses) } }))
+    // classes явно: при -x test зависимость через test пропадает
+    dependsOn(tasks.test, tasks.classes)
+    classDirectories.setFrom(sourceSets.main.get().output.classesDirs.asFileTree.matching { include(coveredClasses) })
     violationRules {
         rule {
             limit {
