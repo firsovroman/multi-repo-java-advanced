@@ -138,7 +138,7 @@ cd individuals-api && ./gradlew check   # openApiValidate + unit + integration +
 ## Nexus
 
 person-client публикуется в Nexus (локально — http://localhost:8091, репозиторий `maven-releases`; Nexus запускается
-отдельным compose вне этого репозитория). Репозиторий подключается только конфигурацией, код менять не нужно:
+отдельным compose: `docker compose -f nexus/docker-compose.yml up -d`). Репозиторий подключается только конфигурацией, код менять не нужно:
 
 ```bash
 # ~/.gradle/gradle.properties или переменные окружения NEXUS_URL / NEXUS_USERNAME / NEXUS_PASSWORD

@@ -95,23 +95,38 @@ paths:
                 details: []
         '502':
           description: |
-            Доменный пользователь создан, но регистрация в Keycloak не завершилась
-            (несогласованная регистрация). Частичный сбой не скрывается.
+            `REGISTRATION_INCONSISTENT` — доменный пользователь создан, но регистрация в Keycloak
+            не завершилась (несогласованная регистрация). Частичный сбой не скрывается.
+            `EXTERNAL_SERVICE_ERROR` — person-service ответил неожиданной ошибкой, пользователь не создан.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-              example:
-                timestamp: '2026-06-08T10:15:30Z'
-                path: /api/v1/auth/registration
-                status: 502
-                error: REGISTRATION_INCONSISTENT
-                message: Регистрация завершилась частично, обратитесь в поддержку
-                traceId: 803b448a0489f84084905d3093480352
-                details:
-                  - 'userUid: 3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e'
+              examples:
+                registrationInconsistent:
+                  value:
+                    timestamp: '2026-06-08T10:15:30Z'
+                    path: /api/v1/auth/registration
+                    status: 502
+                    error: REGISTRATION_INCONSISTENT
+                    message: Регистрация завершилась частично, обратитесь в поддержку
+                    traceId: 803b448a0489f84084905d3093480352
+                    details:
+                      - 'userUid: 3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e'
+                externalServiceError:
+                  value:
+                    timestamp: '2026-06-08T10:15:30Z'
+                    path: /api/v1/auth/registration
+                    status: 502
+                    error: EXTERNAL_SERVICE_ERROR
+                    message: Внешний сервис вернул ошибку
+                    traceId: 803b448a0489f84084905d3093480352
+                    details:
+                      - 'service: person-service'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/auth/login:
     post:
       tags: [auth]
@@ -156,8 +171,12 @@ paths:
                 message: Неверный email или пароль
                 traceId: 803b448a0489f84084905d3093480352
                 details: []
+        '502':
+          $ref: '#/components/responses/BadGateway'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/auth/refresh-token:
     post:
       tags: [auth]
@@ -201,8 +220,12 @@ paths:
                 message: Refresh token недействителен или истёк
                 traceId: 803b448a0489f84084905d3093480352
                 details: []
+        '502':
+          $ref: '#/components/responses/BadGateway'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/auth/me:
     get:
       tags: [auth]
@@ -239,6 +262,8 @@ paths:
                 message: Требуется аутентификация
                 traceId: 803b448a0489f84084905d3093480352
                 details: []
+        '500':
+          $ref: '#/components/responses/InternalError'
 components:
   securitySchemes:
     bearerAuth:
@@ -273,6 +298,35 @@ components:
             status: 503
             error: EXTERNAL_SERVICE_UNAVAILABLE
             message: Внешний сервис временно недоступен
+            traceId: 803b448a0489f84084905d3093480352
+            details: []
+    BadGateway:
+      description: Keycloak ответил неожиданной ошибкой
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            timestamp: '2026-06-08T10:15:30Z'
+            path: /api/v1/auth/login
+            status: 502
+            error: EXTERNAL_SERVICE_ERROR
+            message: Внешний сервис вернул ошибку
+            traceId: 803b448a0489f84084905d3093480352
+            details:
+              - 'service: keycloak'
+    InternalError:
+      description: Непредвиденная ошибка сервиса
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            timestamp: '2026-06-08T10:15:30Z'
+            path: /api/v1/auth/login
+            status: 500
+            error: INTERNAL_ERROR
+            message: Внутренняя ошибка сервиса
             traceId: 803b448a0489f84084905d3093480352
             details: []
   schemas:
