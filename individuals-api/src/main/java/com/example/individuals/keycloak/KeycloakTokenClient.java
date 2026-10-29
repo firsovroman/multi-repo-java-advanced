@@ -4,6 +4,7 @@ import com.example.individuals.config.KeycloakProperties;
 import com.example.individuals.error.ExternalServiceException;
 import com.example.individuals.error.InvalidCredentialsException;
 import com.example.individuals.error.InvalidRefreshTokenException;
+import com.example.individuals.keycloak.dto.KeycloakErrorResponse;
 import com.example.individuals.keycloak.dto.KeycloakTokenResponse;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
@@ -27,6 +28,7 @@ import java.util.function.Supplier;
 public class KeycloakTokenClient {
 
     private static final String TOKEN_PATH = "/realms/{realm}/protocol/openid-connect/token";
+    private static final String INVALID_GRANT = "invalid_grant";
 
     private final WebClient webClient;
     private final KeycloakProperties properties;
@@ -105,13 +107,28 @@ public class KeycloakTokenClient {
     }
 
     /**
-     * Keycloak отвечает 401 на неверные учётные данные и 400 (invalid_grant) на недействительный refresh token
-     * или неактивную учётную запись — для клиента это одинаково «отказ в аутентификации».
+     * Отказ пользователю — только {@code invalid_grant}: Keycloak возвращает его (401 или 400) на неверные
+     * учётные данные, недействительный refresh token и неактивную учётную запись. Остальные коды
+     * ({@code invalid_client}, {@code unauthorized_client}, {@code invalid_request} и т.п.) означают
+     * ошибку конфигурации самого individuals-api как OAuth-клиента — это ошибка интеграции, а не пользователя.
      */
     private static Function<WebClientResponseException, RuntimeException> rejectedAs(
             Supplier<RuntimeException> rejection) {
-        return e -> e.getStatusCode().isSameCodeAs(HttpStatus.UNAUTHORIZED) || e.getStatusCode().isSameCodeAs(HttpStatus.BAD_REQUEST)
+        return e -> isRejection(e) && INVALID_GRANT.equals(oauthError(e))
                 ? rejection.get()
                 : new ExternalServiceException(KeycloakCalls.SERVICE, e);
+    }
+
+    private static boolean isRejection(WebClientResponseException e) {
+        return e.getStatusCode().isSameCodeAs(HttpStatus.UNAUTHORIZED) || e.getStatusCode().isSameCodeAs(HttpStatus.BAD_REQUEST);
+    }
+
+    private static String oauthError(WebClientResponseException e) {
+        try {
+            KeycloakErrorResponse body = e.getResponseBodyAs(KeycloakErrorResponse.class);
+            return body != null ? body.error() : null;
+        } catch (RuntimeException decodingFailure) {
+            return null;
+        }
     }
 }

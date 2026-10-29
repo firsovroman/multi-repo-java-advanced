@@ -206,10 +206,47 @@ class KeycloakGatewayTest {
 
     @Test
     void invalidRefreshTokenIsRejected() {
-        server.stubFor(tokenRequest().willReturn(status(HttpStatus.BAD_REQUEST.value())));
+        server.stubFor(tokenRequest().willReturn(oauthError(HttpStatus.BAD_REQUEST, "invalid_grant")));
 
         StepVerifier.create(gateway.refresh("expired"))
                 .expectError(InvalidRefreshTokenException.class)
+                .verify();
+    }
+
+    @Test
+    void loginWithInvalidClientIsExternalServiceError() {
+        server.stubFor(tokenRequest().willReturn(oauthError(HttpStatus.UNAUTHORIZED, "invalid_client")));
+
+        StepVerifier.create(gateway.login("user@example.com", "Str@ngPass!"))
+                .expectError(ExternalServiceException.class)
+                .verify();
+    }
+
+    @Test
+    void refreshWithInvalidClientIsExternalServiceError() {
+        server.stubFor(tokenRequest().willReturn(oauthError(HttpStatus.UNAUTHORIZED, "invalid_client")));
+
+        StepVerifier.create(gateway.refresh("old-refresh"))
+                .expectError(ExternalServiceException.class)
+                .verify();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"unauthorized_client", "invalid_request", "unsupported_grant_type", "invalid_scope"})
+    void loginWithClientSideOauthErrorIsExternalServiceError(String error) {
+        server.stubFor(tokenRequest().willReturn(oauthError(HttpStatus.BAD_REQUEST, error)));
+
+        StepVerifier.create(gateway.login("user@example.com", "Str@ngPass!"))
+                .expectError(ExternalServiceException.class)
+                .verify();
+    }
+
+    @Test
+    void rejectionWithoutOauthErrorBodyIsExternalServiceError() {
+        server.stubFor(tokenRequest().willReturn(status(HttpStatus.UNAUTHORIZED.value())));
+
+        StepVerifier.create(gateway.login("user@example.com", "Str@ngPass!"))
+                .expectError(ExternalServiceException.class)
                 .verify();
     }
 
@@ -319,6 +356,12 @@ class KeycloakGatewayTest {
 
     private MappingBuilder tokenRequest() {
         return post(TOKEN_PATH);
+    }
+
+    private static ResponseDefinitionBuilder oauthError(HttpStatus status, String error) {
+        return aResponse().withStatus(status.value())
+                .withHeader(HttpHeaders.CONTENT_TYPE, "application/json")
+                .withBody("{\"error\":\"" + error + "\",\"error_description\":\"test\"}");
     }
 
     private void stubAdminToken() {
