@@ -7,8 +7,10 @@ import com.example.individuals.api.model.RegistrationRequest;
 import com.example.individuals.api.model.TokenResponse;
 import com.example.individuals.error.EmailAlreadyExistsException;
 import com.example.individuals.error.ErrorCode;
+import com.example.individuals.error.ExternalServiceException;
 import com.example.individuals.error.ExternalServiceUnavailableException;
 import com.example.individuals.error.InconsistentRegistrationException;
+import com.example.individuals.error.InvalidAccessTokenException;
 import com.example.individuals.error.InvalidCredentialsException;
 import com.example.individuals.error.InvalidRefreshTokenException;
 import com.example.individuals.error.PasswordMismatchException;
@@ -25,6 +27,7 @@ import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
 import reactor.core.publisher.Mono;
@@ -207,13 +210,43 @@ class AuthServiceTest {
     }
 
     @Test
-    void loginWithTokenWithoutUserUidReturnsNullUserId() {
+    void loginWithTokenWithoutUserUidIsExternalServiceError() {
         when(keycloakGateway.login(any(), any())).thenReturn(Mono.just(TOKENS));
         when(jwtDecoder.decode("access-token")).thenReturn(Mono.just(jwt(Map.of("email", EMAIL))));
 
         StepVerifier.create(authService.login(new LoginRequest(EMAIL, PASSWORD)))
-                .assertNext(response -> assertThat(response.getUserId()).isNull())
-                .verifyComplete();
+                .expectErrorSatisfies(e -> assertThat(e).isInstanceOfSatisfying(ExternalServiceException.class,
+                        ex -> assertThat(ex.getStatus()).isEqualTo(HttpStatus.BAD_GATEWAY)))
+                .verify();
+        assertThat(counter("auth.login.failure")).isEqualTo(1);
+    }
+
+    @Test
+    void refreshWithMalformedUserUidIsExternalServiceError() {
+        when(keycloakGateway.refresh("refresh-token")).thenReturn(Mono.just(TOKENS));
+        when(jwtDecoder.decode("access-token")).thenReturn(Mono.just(jwt(Map.of("user_uid", "not-a-uuid"))));
+
+        StepVerifier.create(authService.refresh(new RefreshTokenRequest("refresh-token")))
+                .expectError(ExternalServiceException.class)
+                .verify();
+    }
+
+    @Test
+    void undecodableAccessTokenFromKeycloakIsExternalServiceError() {
+        when(keycloakGateway.login(any(), any())).thenReturn(Mono.just(TOKENS));
+        when(jwtDecoder.decode("access-token")).thenReturn(Mono.error(new BadJwtException("malformed")));
+
+        StepVerifier.create(authService.login(new LoginRequest(EMAIL, PASSWORD)))
+                .expectError(ExternalServiceException.class)
+                .verify();
+    }
+
+    @Test
+    void currentUserWithoutUserUidIsUnauthorized() {
+        StepVerifier.create(authService.currentUser(jwt(Map.of("email", EMAIL))))
+                .expectErrorSatisfies(e -> assertThat(e).isInstanceOfSatisfying(InvalidAccessTokenException.class,
+                        ex -> assertThat(ex.getStatus()).isEqualTo(HttpStatus.UNAUTHORIZED)))
+                .verify();
     }
 
     @Test

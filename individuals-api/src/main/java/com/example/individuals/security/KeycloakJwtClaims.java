@@ -5,6 +5,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -21,9 +22,22 @@ public final class KeycloakJwtClaims {
     private KeycloakJwtClaims() {
     }
 
-    public static UUID userUid(Jwt jwt) {
+    /**
+     * Доменный идентификатор из claim {@code user_uid}; пусто, если claim отсутствует или не является UUID
+     * в канонической записи.
+     */
+    public static Optional<UUID> userUid(Jwt jwt) {
         String value = jwt.getClaimAsString(USER_UID);
-        return value == null || value.isBlank() ? null : UUID.fromString(value);
+        if (value == null) {
+            return Optional.empty();
+        }
+        try {
+            UUID userUid = UUID.fromString(value);
+            // UUID.fromString принимает и неканонические записи вида "1-2-3-4-5"
+            return userUid.toString().equalsIgnoreCase(value) ? Optional.of(userUid) : Optional.empty();
+        } catch (IllegalArgumentException e) {
+            return Optional.empty();
+        }
     }
 
     /**

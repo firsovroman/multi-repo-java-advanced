@@ -18,7 +18,7 @@ import java.util.function.Function;
 @Component
 public class KeycloakCalls {
 
-    static final String SERVICE = "keycloak";
+    public static final String SERVICE = "keycloak";
 
     private final ExternalCallMetrics metrics;
 

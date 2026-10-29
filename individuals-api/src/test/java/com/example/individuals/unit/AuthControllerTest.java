@@ -27,7 +27,9 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.publisher.Mono;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -212,6 +214,48 @@ class AuthControllerTest {
     }
 
     @Test
+    void meWithTokenWithoutUserUidReturns401() {
+        when(jwtDecoder.decode("no-user-uid")).thenReturn(Mono.just(bearerJwt(Map.of("email", "user@example.com"))));
+
+        webTestClient.get().uri("/api/v1/auth/me")
+                .headers(headers -> headers.setBearerAuth("no-user-uid"))
+                .exchange()
+                .expectStatus().isUnauthorized()
+                .expectHeader().valueEquals("WWW-Authenticate", "Bearer")
+                .expectBody()
+                .jsonPath("$.error").isEqualTo("UNAUTHORIZED");
+
+        verify(authService, never()).currentUser(any());
+    }
+
+    @Test
+    void meWithMalformedUserUidReturns401() {
+        when(jwtDecoder.decode("bad-user-uid")).thenReturn(Mono.just(bearerJwt(Map.of("user_uid", "not-a-uuid"))));
+
+        webTestClient.get().uri("/api/v1/auth/me")
+                .headers(headers -> headers.setBearerAuth("bad-user-uid"))
+                .exchange()
+                .expectStatus().isUnauthorized()
+                .expectBody()
+                .jsonPath("$.error").isEqualTo("UNAUTHORIZED");
+
+        verify(authService, never()).currentUser(any());
+    }
+
+    @Test
+    void meWithValidBearerTokenPassesAuthentication() {
+        when(jwtDecoder.decode("valid")).thenReturn(Mono.just(bearerJwt(Map.of("user_uid", USER_UID.toString()))));
+        when(authService.currentUser(any(Jwt.class))).thenReturn(Mono.just(new CurrentUserResponse().userUid(USER_UID)));
+
+        webTestClient.get().uri("/api/v1/auth/me")
+                .headers(headers -> headers.setBearerAuth("valid"))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.userUid").isEqualTo(USER_UID.toString());
+    }
+
+    @Test
     void unknownPathReturnsErrorResponse() {
         webTestClient.mutateWith(mockJwt())
                 .get().uri("/api/v1/unknown")
@@ -219,6 +263,13 @@ class AuthControllerTest {
                 .expectStatus().isNotFound()
                 .expectBody()
                 .jsonPath("$.error").isEqualTo("NOT_FOUND");
+    }
+
+    private static Jwt bearerJwt(Map<String, Object> claims) {
+        Jwt.Builder builder = Jwt.withTokenValue("token").header("alg", "RS256").subject("kc-id")
+                .issuedAt(Instant.now()).expiresAt(Instant.now().plusSeconds(300));
+        claims.forEach(builder::claim);
+        return builder.build();
     }
 
     private static String registration(String email) {

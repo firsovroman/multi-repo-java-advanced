@@ -10,6 +10,7 @@ import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.InvalidBearerTokenException;
 import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtAuthenticationConverter;
 import org.springframework.security.web.server.SecurityWebFilterChain;
 import org.springframework.security.web.server.context.NoOpServerSecurityContextRepository;
@@ -46,12 +47,16 @@ public class SecurityConfig {
     }
 
     /**
-     * Роли realm Keycloak становятся authorities вида {@code ROLE_USER}.
+     * Роли realm Keycloak становятся authorities вида {@code ROLE_USER}. Токен без корректного
+     * {@code user_uid} отклоняется с 401: без доменного идентификатора пользователь не аутентифицирован.
      */
     private static Converter<Jwt, Mono<AbstractAuthenticationToken>> keycloakAuthenticationConverter() {
         ReactiveJwtAuthenticationConverter converter = new ReactiveJwtAuthenticationConverter();
         converter.setJwtGrantedAuthoritiesConverter(jwt -> Flux.fromIterable(KeycloakJwtClaims.realmRoles(jwt))
                 .map(role -> (GrantedAuthority) new SimpleGrantedAuthority("ROLE_" + role)));
-        return converter;
+        return jwt -> KeycloakJwtClaims.userUid(jwt).isPresent()
+                ? converter.convert(jwt)
+                : Mono.error(new InvalidBearerTokenException(
+                        "Access token has missing or malformed " + KeycloakJwtClaims.USER_UID + " claim"));
     }
 }

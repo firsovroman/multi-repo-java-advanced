@@ -5,9 +5,12 @@ import com.example.individuals.api.model.LoginRequest;
 import com.example.individuals.api.model.RefreshTokenRequest;
 import com.example.individuals.api.model.RegistrationRequest;
 import com.example.individuals.api.model.TokenResponse;
+import com.example.individuals.error.ExternalServiceException;
 import com.example.individuals.error.InconsistentRegistrationException;
+import com.example.individuals.error.InvalidAccessTokenException;
 import com.example.individuals.error.PasswordMismatchException;
 import com.example.individuals.gateway.PersonGateway;
+import com.example.individuals.keycloak.KeycloakCalls;
 import com.example.individuals.keycloak.KeycloakGateway;
 import com.example.individuals.keycloak.dto.KeycloakTokenResponse;
 import com.example.individuals.logging.LogContext;
@@ -16,6 +19,7 @@ import com.example.individuals.security.KeycloakJwtClaims;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
@@ -74,8 +78,15 @@ public class AuthService {
                 .flatMap(this::toTokenResponse);
     }
 
+    /**
+     * Токен без корректного {@code user_uid} отклоняется ещё в {@code SecurityConfig}; проверка здесь
+     * защищает от вызова в обход этого конвертера.
+     */
     public Mono<CurrentUserResponse> currentUser(Jwt jwt) {
-        UUID userUid = KeycloakJwtClaims.userUid(jwt);
+        UUID userUid = KeycloakJwtClaims.userUid(jwt).orElse(null);
+        if (userUid == null) {
+            return Mono.error(new InvalidAccessTokenException());
+        }
         CurrentUserResponse response = new CurrentUserResponse()
                 .userUid(userUid)
                 .keycloakUserId(jwt.getSubject())
@@ -117,14 +128,18 @@ public class AuthService {
                 });
     }
 
+    /**
+     * Токен от Keycloak без корректного {@code user_uid} — некорректный ответ внешнего сервиса
+     * (не настроен mapper атрибута или атрибут повреждён), а не ошибка клиента.
+     */
     private Mono<TokenResponse> toTokenResponse(KeycloakTokenResponse tokens) {
-        return jwtDecoder.decode(tokens.accessToken()).flatMap(jwt -> {
-            UUID userUid = KeycloakJwtClaims.userUid(jwt);
-            if (userUid == null) {
-                log.warn("Access token has no {} claim", KeycloakJwtClaims.USER_UID);
-            }
-            return LogContext.putUserUid(userUid).thenReturn(toTokenResponse(userUid, tokens));
-        });
+        return jwtDecoder.decode(tokens.accessToken())
+                .onErrorMap(JwtException.class, e -> new ExternalServiceException(KeycloakCalls.SERVICE, e))
+                .flatMap(jwt -> KeycloakJwtClaims.userUid(jwt)
+                        .map(userUid -> LogContext.putUserUid(userUid).thenReturn(toTokenResponse(userUid, tokens)))
+                        .orElseGet(() -> Mono.error(new ExternalServiceException(KeycloakCalls.SERVICE,
+                                new IllegalStateException("Keycloak access token has missing or malformed "
+                                        + KeycloakJwtClaims.USER_UID + " claim")))));
     }
 
     private static TokenResponse toTokenResponse(UUID userUid, KeycloakTokenResponse tokens) {

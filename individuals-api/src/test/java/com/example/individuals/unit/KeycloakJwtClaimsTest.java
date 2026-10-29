@@ -29,8 +29,15 @@ class KeycloakJwtClaimsTest {
     void userUidIsParsedFromClaim() {
         UUID userUid = UUID.randomUUID();
 
-        assertThat(KeycloakJwtClaims.userUid(jwt(Map.of("user_uid", userUid.toString())))).isEqualTo(userUid);
-        assertThat(KeycloakJwtClaims.userUid(jwt(Map.of("user_uid", " ")))).isNull();
+        assertThat(KeycloakJwtClaims.userUid(jwt(Map.of("user_uid", userUid.toString())))).contains(userUid);
+    }
+
+    @Test
+    void missingOrMalformedUserUidGivesEmpty() {
+        assertThat(KeycloakJwtClaims.userUid(jwt(Map.of("email", "user@example.com")))).isEmpty();
+        assertThat(KeycloakJwtClaims.userUid(jwt(Map.of("user_uid", " ")))).isEmpty();
+        assertThat(KeycloakJwtClaims.userUid(jwt(Map.of("user_uid", "not-a-uuid")))).isEmpty();
+        assertThat(KeycloakJwtClaims.userUid(jwt(Map.of("user_uid", "1-2-3-4-5")))).isEmpty();
     }
 
     private static Jwt jwt(Map<String, Object> claims) {
