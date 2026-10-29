@@ -7,7 +7,9 @@ import com.example.individuals.metrics.ExternalCallMetrics;
 import com.example.person.client.api.PersonsApi;
 import com.example.person.client.model.PersonRegistrationRequest;
 import com.example.person.client.model.PersonRegistrationResponse;
+import org.springframework.core.codec.DecodingException;
 import org.springframework.stereotype.Component;
+import org.springframework.web.reactive.function.UnsupportedMediaTypeException;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Mono;
@@ -46,7 +48,15 @@ public class PersonGateway {
         return metrics.record(ExternalCallMetrics.PERSON_SERVICE, operation, call)
                 .onErrorMap(WebClientResponseException.Conflict.class, e -> new EmailAlreadyExistsException())
                 .onErrorMap(PersonGateway::isUnavailable, e -> new ExternalServiceUnavailableException(SERVICE, e))
-                .onErrorMap(WebClientResponseException.class, e -> new ExternalServiceException(SERVICE, e));
+                .onErrorMap(WebClientResponseException.class, e -> new ExternalServiceException(SERVICE, e))
+                .onErrorMap(PersonGateway::isUnreadableResponse, e -> new ExternalServiceException(SERVICE, e));
+    }
+
+    /**
+     * Ответ получен, но тело не разбирается: невалидный JSON или неожиданный Content-Type.
+     */
+    private static boolean isUnreadableResponse(Throwable e) {
+        return e instanceof DecodingException || e instanceof UnsupportedMediaTypeException;
     }
 
     private static boolean isUnavailable(Throwable e) {

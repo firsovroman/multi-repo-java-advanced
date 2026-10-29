@@ -249,6 +249,25 @@ class KeycloakGatewayTest {
                 .verify();
     }
 
+    @Test
+    void malformedJsonTokenResponseIsExternalServiceError() {
+        server.stubFor(tokenRequest().willReturn(okJson("{\"access_token\":")));
+
+        StepVerifier.create(gateway.login("user@example.com", "Str@ngPass!"))
+                .expectError(ExternalServiceException.class)
+                .verify();
+    }
+
+    @Test
+    void unexpectedContentTypeTokenResponseIsExternalServiceError() {
+        server.stubFor(tokenRequest().willReturn(ok("<html>proxy error</html>")
+                .withHeader(HttpHeaders.CONTENT_TYPE, "text/html")));
+
+        StepVerifier.create(gateway.login("user@example.com", "Str@ngPass!"))
+                .expectError(ExternalServiceException.class)
+                .verify();
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
             "{\"expires_in\":300,\"token_type\":\"Bearer\"}",

@@ -6,7 +6,6 @@ import com.example.individuals.error.InvalidCredentialsException;
 import com.example.individuals.error.InvalidRefreshTokenException;
 import com.example.individuals.keycloak.dto.KeycloakTokenResponse;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.core.codec.DecodingException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -72,8 +71,6 @@ public class KeycloakTokenClient {
                         .body(BodyInserters.fromFormData(form))
                         .retrieve()
                         .bodyToMono(KeycloakTokenResponse.class), onClientError)
-                // Например, отсутствующий expires_in не отображается в примитив long
-                .onErrorMap(DecodingException.class, e -> new ExternalServiceException(KeycloakCalls.SERVICE, e))
                 .switchIfEmpty(Mono.error(() -> invalidResponse("empty token response")))
                 .flatMap(response -> validate(response, refreshTokenRequired));
     }

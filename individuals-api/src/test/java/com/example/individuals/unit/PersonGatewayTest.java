@@ -14,9 +14,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.core.codec.DecodingException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.web.reactive.function.UnsupportedMediaTypeException;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Mono;
@@ -24,6 +27,7 @@ import reactor.test.StepVerifier;
 
 import java.net.ConnectException;
 import java.net.URI;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -103,6 +107,25 @@ class PersonGatewayTest {
     @Test
     void responseWithoutUserUidIsExternalServiceError() {
         when(personsApi.registerPerson(any())).thenReturn(Mono.just(new PersonRegistrationResponse()));
+
+        StepVerifier.create(gateway.registerPerson("user@example.com", "Ivan", "Ivanov"))
+                .expectError(ExternalServiceException.class)
+                .verify();
+    }
+
+    @Test
+    void malformedResponseBodyIsExternalServiceError() {
+        when(personsApi.registerPerson(any())).thenReturn(Mono.error(new DecodingException("JSON decoding error")));
+
+        StepVerifier.create(gateway.registerPerson("user@example.com", "Ivan", "Ivanov"))
+                .expectError(ExternalServiceException.class)
+                .verify();
+    }
+
+    @Test
+    void unexpectedContentTypeIsExternalServiceError() {
+        when(personsApi.registerPerson(any())).thenReturn(Mono.error(new UnsupportedMediaTypeException(
+                MediaType.TEXT_HTML, List.of(MediaType.APPLICATION_JSON))));
 
         StepVerifier.create(gateway.registerPerson("user@example.com", "Ivan", "Ivanov"))
                 .expectError(ExternalServiceException.class)

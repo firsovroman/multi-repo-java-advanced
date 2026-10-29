@@ -3,7 +3,9 @@ package com.example.individuals.keycloak;
 import com.example.individuals.error.ExternalServiceException;
 import com.example.individuals.error.ExternalServiceUnavailableException;
 import com.example.individuals.metrics.ExternalCallMetrics;
+import org.springframework.core.codec.DecodingException;
 import org.springframework.stereotype.Component;
+import org.springframework.web.reactive.function.UnsupportedMediaTypeException;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Mono;
@@ -13,7 +15,8 @@ import java.util.function.Function;
 /**
  * Общая обёртка вызовов Keycloak: таймер {@code external.keycloak.requests} и перевод
  * сетевых ошибок и 5xx в {@link ExternalServiceUnavailableException}, а неожиданных 4xx —
- * в {@link ExternalServiceException}. Ожидаемые 4xx вызывающий код обрабатывает сам в {@code onClientError}.
+ * в {@link ExternalServiceException}. Неразбираемое тело ответа (невалидный JSON, неожиданный Content-Type) —
+ * тоже {@link ExternalServiceException}. Ожидаемые 4xx вызывающий код обрабатывает сам в {@code onClientError}.
  */
 @Component
 public class KeycloakCalls {
@@ -41,6 +44,11 @@ public class KeycloakCalls {
                     return e.getStatusCode().is5xxServerError()
                             ? new ExternalServiceUnavailableException(SERVICE, e)
                             : new ExternalServiceException(SERVICE, e);
-                });
+                })
+                .onErrorMap(KeycloakCalls::isUnreadableResponse, e -> new ExternalServiceException(SERVICE, e));
+    }
+
+    private static boolean isUnreadableResponse(Throwable e) {
+        return e instanceof DecodingException || e instanceof UnsupportedMediaTypeException;
     }
 }
