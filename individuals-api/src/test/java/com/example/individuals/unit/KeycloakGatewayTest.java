@@ -18,6 +18,8 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
@@ -245,6 +247,55 @@ class KeycloakGatewayTest {
         StepVerifier.create(gateway.login("user@example.com", "Str@ngPass!"))
                 .expectError(ExternalServiceException.class)
                 .verify();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "{\"expires_in\":300,\"token_type\":\"Bearer\"}",
+            "{\"access_token\":\"\",\"refresh_token\":\"refresh\",\"expires_in\":300}",
+            "{\"access_token\":\"user-token\",\"expires_in\":300}",
+            "{\"access_token\":\"user-token\",\"refresh_token\":\" \",\"expires_in\":300}",
+            "{\"access_token\":\"user-token\",\"refresh_token\":\"refresh\"}",
+            "{\"access_token\":\"user-token\",\"refresh_token\":\"refresh\",\"expires_in\":0}",
+            "{\"access_token\":\"user-token\",\"refresh_token\":\"refresh\",\"expires_in\":-1}"
+    })
+    void incompleteUserTokenResponseIsExternalServiceError(String body) {
+        server.stubFor(tokenRequest().willReturn(okJson(body)));
+
+        StepVerifier.create(gateway.login("user@example.com", "Str@ngPass!"))
+                .expectError(ExternalServiceException.class)
+                .verify();
+        StepVerifier.create(gateway.refresh("old-refresh"))
+                .expectError(ExternalServiceException.class)
+                .verify();
+    }
+
+    @Test
+    void adminTokenWithoutRefreshTokenIsAccepted() {
+        server.stubFor(tokenRequest()
+                .withFormParam("grant_type", equalTo("client_credentials"))
+                .willReturn(okJson("{\"access_token\":\"admin-token\",\"expires_in\":300,\"token_type\":\"Bearer\"}")));
+        server.stubFor(post(USERS_PATH)
+                .withHeader(HttpHeaders.AUTHORIZATION, equalTo("Bearer admin-token"))
+                .willReturn(created("kc-user-id")));
+
+        StepVerifier.create(gateway.createUser("user@example.com", "Ivan", "Ivanov", UUID.randomUUID()))
+                .expectNext("kc-user-id")
+                .verifyComplete();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "{\"expires_in\":300,\"token_type\":\"Bearer\"}",
+            "{\"access_token\":\"admin-token\",\"expires_in\":0}"
+    })
+    void incompleteAdminTokenResponseIsExternalServiceError(String body) {
+        server.stubFor(tokenRequest().willReturn(okJson(body)));
+
+        StepVerifier.create(gateway.createUser("user@example.com", "Ivan", "Ivanov", UUID.randomUUID()))
+                .expectError(ExternalServiceException.class)
+                .verify();
+        server.verify(0, postRequestedFor(urlEqualTo(USERS_PATH)));
     }
 
     private MappingBuilder tokenRequest() {

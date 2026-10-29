@@ -6,11 +6,13 @@ import com.example.individuals.error.InvalidCredentialsException;
 import com.example.individuals.error.InvalidRefreshTokenException;
 import com.example.individuals.keycloak.dto.KeycloakTokenResponse;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.codec.DecodingException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.util.StringUtils;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
@@ -43,13 +45,13 @@ public class KeycloakTokenClient {
         form.add("username", username);
         form.add("password", password);
         form.add("scope", "openid");
-        return requestToken("password_grant", form, rejectedAs(InvalidCredentialsException::new));
+        return requestToken("password_grant", form, true, rejectedAs(InvalidCredentialsException::new));
     }
 
     public Mono<KeycloakTokenResponse> refresh(String refreshToken) {
         MultiValueMap<String, String> form = clientForm("refresh_token");
         form.add("refresh_token", refreshToken);
-        return requestToken("refresh_token", form, rejectedAs(InvalidRefreshTokenException::new));
+        return requestToken("refresh_token", form, true, rejectedAs(InvalidRefreshTokenException::new));
     }
 
     public Mono<KeycloakTokenResponse> clientCredentials(String clientId, String clientSecret) {
@@ -57,10 +59,12 @@ public class KeycloakTokenClient {
         form.add("grant_type", "client_credentials");
         form.add("client_id", clientId);
         form.add("client_secret", clientSecret);
-        return requestToken("admin_token", form, e -> new ExternalServiceException(KeycloakCalls.SERVICE, e));
+        // По RFC 6749 §4.4.3 refresh token для client_credentials выдавать не следует
+        return requestToken("admin_token", form, false, e -> new ExternalServiceException(KeycloakCalls.SERVICE, e));
     }
 
     private Mono<KeycloakTokenResponse> requestToken(String operation, MultiValueMap<String, String> form,
+                                                     boolean refreshTokenRequired,
                                                      Function<WebClientResponseException, RuntimeException> onClientError) {
         return calls.execute(operation, webClient.post()
                         .uri(TOKEN_PATH, properties.realm())
@@ -68,8 +72,31 @@ public class KeycloakTokenClient {
                         .body(BodyInserters.fromFormData(form))
                         .retrieve()
                         .bodyToMono(KeycloakTokenResponse.class), onClientError)
-                .switchIfEmpty(Mono.error(() -> new ExternalServiceException(KeycloakCalls.SERVICE,
-                        new IllegalStateException("Keycloak returned empty token response"))));
+                // Например, отсутствующий expires_in не отображается в примитив long
+                .onErrorMap(DecodingException.class, e -> new ExternalServiceException(KeycloakCalls.SERVICE, e))
+                .switchIfEmpty(Mono.error(() -> invalidResponse("empty token response")))
+                .flatMap(response -> validate(response, refreshTokenRequired));
+    }
+
+    /**
+     * Keycloak может ответить 200 с неполным телом — такой ответ нельзя отдавать клиенту как успешный.
+     */
+    private static Mono<KeycloakTokenResponse> validate(KeycloakTokenResponse response, boolean refreshTokenRequired) {
+        if (!StringUtils.hasText(response.accessToken())) {
+            return Mono.error(invalidResponse("token response without access_token"));
+        }
+        if (refreshTokenRequired && !StringUtils.hasText(response.refreshToken())) {
+            return Mono.error(invalidResponse("token response without refresh_token"));
+        }
+        if (response.expiresIn() <= 0) {
+            return Mono.error(invalidResponse("token response with non-positive expires_in"));
+        }
+        return Mono.just(response);
+    }
+
+    private static ExternalServiceException invalidResponse(String reason) {
+        return new ExternalServiceException(KeycloakCalls.SERVICE,
+                new IllegalStateException("Keycloak returned " + reason));
     }
 
     private MultiValueMap<String, String> clientForm(String grantType) {
