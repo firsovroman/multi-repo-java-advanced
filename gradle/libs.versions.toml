@@ -3,7 +3,7 @@
 # через versionCatalogs { create("libs") { from(files("../gradle/libs.versions.toml")) } }.
 
 [versions]
-spring-boot = "4.1.2"
+spring-boot = "4.0.9"
 spring-dependency-management = "1.1.7"
 openapi-generator = "7.26.0"
 foojay = "1.0.0"
