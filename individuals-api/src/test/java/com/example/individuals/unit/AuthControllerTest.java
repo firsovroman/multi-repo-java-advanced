@@ -30,6 +30,7 @@ import reactor.core.publisher.Mono;
 import java.util.List;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -94,6 +95,26 @@ class AuthControllerTest {
                 .expectBody()
                 .jsonPath("$.error").isEqualTo("VALIDATION_ERROR")
                 .jsonPath("$.details").isNotEmpty();
+
+        verify(authService, never()).register(any());
+    }
+
+    @Test
+    void emailAtKeycloakLimitIsAccepted() {
+        when(authService.register(any())).thenReturn(Mono.just(new TokenResponse(USER_UID, "access", "refresh", 300L, "Bearer")));
+
+        post("/api/v1/auth/registration", registration(emailOfLength(255)))
+                .expectStatus().isCreated();
+    }
+
+    @Test
+    void emailLongerThanKeycloakLimitReturns400WithoutExternalCalls() {
+        // Keycloak ограничивает email 255 символами: длиннее — отказ до person-service, без частичной регистрации
+        post("/api/v1/auth/registration", registration(emailOfLength(256)))
+                .expectStatus().isBadRequest()
+                .expectBody()
+                .jsonPath("$.error").isEqualTo("VALIDATION_ERROR")
+                .jsonPath("$.details[0]").value(detail -> assertThat((String) detail).startsWith("email:"));
 
         verify(authService, never()).register(any());
     }
@@ -198,6 +219,33 @@ class AuthControllerTest {
                 .expectStatus().isNotFound()
                 .expectBody()
                 .jsonPath("$.error").isEqualTo("NOT_FOUND");
+    }
+
+    private static String registration(String email) {
+        return REGISTRATION.replace("user@example.com", email);
+    }
+
+    /**
+     * Синтаксически корректный email заданной длины: локальная часть 64 символа, метки домена не длиннее 63,
+     * чтобы отказ был вызван только ограничением длины, а не форматом.
+     */
+    private static String emailOfLength(int length) {
+        String local = "a".repeat(64);
+        String tld = ".com";
+        int labelsLength = length - local.length() - 1 - tld.length();
+        StringBuilder domain = new StringBuilder();
+        while (labelsLength > 0) {
+            if (!domain.isEmpty()) {
+                domain.append('.');
+                labelsLength--;
+            }
+            int label = Math.min(63, labelsLength);
+            domain.append("b".repeat(label));
+            labelsLength -= label;
+        }
+        String email = local + "@" + domain + tld;
+        assertThat(email).hasSize(length);
+        return email;
     }
 
     private WebTestClient.ResponseSpec post(String uri, String body) {
