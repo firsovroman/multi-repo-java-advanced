@@ -77,7 +77,7 @@ public abstract class AbstractIntegrationTest {
                 .willReturn(aResponse()
                         .withStatus(201)
                         .withHeader("Content-Type", "application/json")
-                        .withBody("{\"userUid\":\"" + userUid + "\"}")));
+                        .withBody("{\"userId\":\"" + userUid + "\"}")));
         return userUid;
     }
 

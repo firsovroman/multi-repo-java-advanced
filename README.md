@@ -76,7 +76,7 @@ curl -X POST http://localhost:8081/api/v1/auth/refresh-token \
 
 # Текущий пользователь -> 200
 curl http://localhost:8081/api/v1/auth/me -H "Authorization: Bearer <jwt>"
-# {"userUid":"3d6f3532-...","keycloakUserId":"6d4a6249-...","email":"user@example.com",
+# {"userId":"3d6f3532-...","keycloakUserId":"6d4a6249-...","email":"user@example.com",
 #  "firstName":"Ivan","lastName":"Ivanov","roles":["USER"],"emailVerified":false}
 ```
 
@@ -96,7 +96,7 @@ curl http://localhost:8081/api/v1/auth/me -H "Authorization: Bearer <jwt>"
 | refresh token недействителен | 401 | `INVALID_REFRESH_TOKEN` |
 | нет или неверный Bearer token | 401 | `UNAUTHORIZED` |
 | email уже существует (person-service) | 409 | `CONFLICT` |
-| person создан, Keycloak не завершил регистрацию | 502 | `REGISTRATION_INCONSISTENT` (+ `userUid` в `details`) |
+| person создан, Keycloak не завершил регистрацию | 502 | `REGISTRATION_INCONSISTENT` (+ `userId` в `details`) |
 | внешний сервис вернул неожиданную ошибку | 502 | `EXTERNAL_SERVICE_ERROR` |
 | внешний сервис недоступен | 503 | `EXTERNAL_SERVICE_UNAVAILABLE` |
 

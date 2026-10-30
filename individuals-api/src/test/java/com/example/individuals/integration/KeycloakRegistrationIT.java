@@ -146,7 +146,7 @@ class KeycloakRegistrationIT extends AbstractIntegrationTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         CurrentUserResponse me = response.getBody();
         assertThat(me).isNotNull();
-        assertThat(me.getUserUid()).isEqualTo(userUid);
+        assertThat(me.getUserId()).isEqualTo(userUid);
         assertThat(me.getEmail()).isEqualTo(email);
         assertThat(me.getFirstName()).isEqualTo("Ivan");
         assertThat(me.getLastName()).isEqualTo("Ivanov");

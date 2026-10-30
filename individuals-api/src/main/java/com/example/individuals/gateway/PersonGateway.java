@@ -33,15 +33,15 @@ public class PersonGateway {
     }
 
     /**
-     * Создаёт доменного пользователя и возвращает его {@code userUid}.
+     * Создаёт доменного пользователя и возвращает его {@code userId}.
      * Ошибка {@link EmailAlreadyExistsException} — если пользователь с таким email уже есть.
      */
     public Mono<UUID> registerPerson(String email, String firstName, String lastName) {
         PersonRegistrationRequest request = new PersonRegistrationRequest(email, firstName, lastName);
         return call("register_person", Mono.defer(() -> personsApi.registerPerson(Mono.just(request))))
-                .mapNotNull(PersonRegistrationResponse::getUserUid)
+                .mapNotNull(PersonRegistrationResponse::getUserId)
                 .switchIfEmpty(Mono.error(() -> new ExternalServiceException(SERVICE,
-                        new IllegalStateException("person-service returned no userUid"))));
+                        new IllegalStateException("person-service returned no userId"))));
     }
 
     private <T> Mono<T> call(String operation, Mono<T> call) {

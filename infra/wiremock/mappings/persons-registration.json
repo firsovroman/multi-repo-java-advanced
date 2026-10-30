@@ -44,7 +44,7 @@
         "status": 201,
         "headers": { "Content-Type": "application/json" },
         "jsonBody": {
-          "userUid": "{{randomValue type='UUID'}}"
+          "userId": "{{randomValue type='UUID'}}"
         },
         "transformers": ["response-template"]
       }

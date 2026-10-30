@@ -33,8 +33,8 @@ collection:
       afterResponse: |-
         insomnia.test('201 Created', () => insomnia.expect(insomnia.response.code).to.eql(201));
         const body = insomnia.response.json();
-        insomnia.test('userUid', () => insomnia.expect(body.userUid).to.be.a('string'));
-        insomnia.baseEnvironment.set('userUid', body.userUid);
+        insomnia.test('userId', () => insomnia.expect(body.userId).to.be.a('string'));
+        insomnia.baseEnvironment.set('userUid', body.userId);
   - name: 2. Get by userUid
     meta:
       id: req_person_get_by_uid
@@ -47,7 +47,7 @@ collection:
       afterResponse: |-
         insomnia.test('200 OK', () => insomnia.expect(insomnia.response.code).to.eql(200));
         const body = insomnia.response.json();
-        insomnia.test('тот же userUid', () => insomnia.expect(body.userUid).to.eql(insomnia.baseEnvironment.get('userUid')));
+        insomnia.test('тот же userId', () => insomnia.expect(body.userId).to.eql(insomnia.baseEnvironment.get('userUid')));
         insomnia.test('обязательные поля', () => {
           insomnia.expect(body.email).to.be.a('string');
           insomnia.expect(body.firstName).to.be.a('string');
@@ -70,7 +70,7 @@ collection:
         insomnia.test('200 OK', () => insomnia.expect(insomnia.response.code).to.eql(200));
         const body = insomnia.response.json();
         insomnia.test('тот же email', () => insomnia.expect(body.email).to.eql(insomnia.baseEnvironment.get('email')));
-        insomnia.test('userUid', () => insomnia.expect(body.userUid).to.be.a('string'));
+        insomnia.test('userId', () => insomnia.expect(body.userId).to.be.a('string'));
   - name: Errors
     meta:
       id: fld_person_errors

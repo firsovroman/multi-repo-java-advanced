@@ -151,7 +151,7 @@ class AuthControllerTest {
                 .expectStatus().isEqualTo(502)
                 .expectBody()
                 .jsonPath("$.error").isEqualTo("REGISTRATION_INCONSISTENT")
-                .jsonPath("$.details[0]").isEqualTo("userUid: " + USER_UID);
+                .jsonPath("$.details[0]").isEqualTo("userId: " + USER_UID);
     }
 
     @Test
@@ -190,7 +190,7 @@ class AuthControllerTest {
     void meWithValidTokenReturnsCurrentUser() {
         // UT-ME-001 на уровне HTTP
         when(authService.currentUser(any(Jwt.class))).thenReturn(Mono.just(new CurrentUserResponse()
-                .userUid(USER_UID).keycloakUserId("kc-id").email("user@example.com")
+                .userId(USER_UID).keycloakUserId("kc-id").email("user@example.com")
                 .firstName("Ivan").lastName("Ivanov").roles(List.of("USER")).emailVerified(false)));
 
         webTestClient.mutateWith(mockJwt().jwt(token -> token.subject("kc-id")))
@@ -198,7 +198,7 @@ class AuthControllerTest {
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()
-                .jsonPath("$.userUid").isEqualTo(USER_UID.toString())
+                .jsonPath("$.userId").isEqualTo(USER_UID.toString())
                 .jsonPath("$.keycloakUserId").isEqualTo("kc-id")
                 .jsonPath("$.roles[0]").isEqualTo("USER");
     }
@@ -245,14 +245,14 @@ class AuthControllerTest {
     @Test
     void meWithValidBearerTokenPassesAuthentication() {
         when(jwtDecoder.decode("valid")).thenReturn(Mono.just(bearerJwt(Map.of("user_uid", USER_UID.toString()))));
-        when(authService.currentUser(any(Jwt.class))).thenReturn(Mono.just(new CurrentUserResponse().userUid(USER_UID)));
+        when(authService.currentUser(any(Jwt.class))).thenReturn(Mono.just(new CurrentUserResponse().userId(USER_UID)));
 
         webTestClient.get().uri("/api/v1/auth/me")
                 .headers(headers -> headers.setBearerAuth("valid"))
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()
-                .jsonPath("$.userUid").isEqualTo(USER_UID.toString());
+                .jsonPath("$.userId").isEqualTo(USER_UID.toString());
     }
 
     @Test

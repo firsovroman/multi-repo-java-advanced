@@ -3,7 +3,7 @@ info:
   title: person-service API
   description: |
     Контракт сервиса доменных пользователей. person-service — источник доменной истины
-    о пользователе; его идентификатор `userUid` является сквозным идентификатором платформы.
+    о пользователе; его идентификатор `userId` является сквозным идентификатором платформы.
     Операции этого контракта не переименовываются без крайней необходимости.
   version: 1.0.0
 servers:
@@ -18,7 +18,7 @@ paths:
       tags: [persons]
       operationId: registerPerson
       summary: Создать доменного пользователя
-      description: Создаёт доменного пользователя и возвращает его `userUid`.
+      description: Создаёт доменного пользователя и возвращает его `userId`.
       requestBody:
         required: true
         content:
@@ -37,7 +37,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PersonRegistrationResponse'
               example:
-                userUid: 3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e
+                userId: 3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e
         '400':
           $ref: '#/components/responses/BadRequest'
         '409':
@@ -76,7 +76,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PersonResponse'
               example:
-                userUid: 3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e
+                userId: 3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e
                 email: user@example.com
                 firstName: Ivan
                 lastName: Ivanov
@@ -106,7 +106,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PersonResponse'
               example:
-                userUid: 3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e
+                userId: 3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e
                 email: user@example.com
                 firstName: Ivan
                 lastName: Ivanov
@@ -180,17 +180,17 @@ components:
           maxLength: 64
     PersonRegistrationResponse:
       type: object
-      required: [userUid]
+      required: [userId]
       properties:
-        userUid:
+        userId:
           type: string
           format: uuid
           description: Доменный идентификатор пользователя
     PersonResponse:
       type: object
-      required: [userUid, email, firstName, lastName, filled]
+      required: [userId, email, firstName, lastName, filled]
       properties:
-        userUid:
+        userId:
           type: string
           format: uuid
         email:

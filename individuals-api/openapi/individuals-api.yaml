@@ -3,7 +3,7 @@ info:
   title: individuals-api
   description: |
     Внешний входной слой платформы: регистрация, вход, обновление токена и получение текущего пользователя.
-    individuals-api оркестрирует person-service (доменный пользователь, `userUid`) и Keycloak
+    individuals-api оркестрирует person-service (доменный пользователь, `userId`) и Keycloak
     (учётная запись и токены) и сам доменных данных не хранит.
 
     Поле `error` в `ErrorResponse` содержит код бизнес-ошибки:
@@ -112,7 +112,7 @@ paths:
                     message: Регистрация завершилась частично, обратитесь в поддержку
                     traceId: 803b448a0489f84084905d3093480352
                     details:
-                      - 'userUid: 3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e'
+                      - 'userId: 3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e'
                 externalServiceError:
                   value:
                     timestamp: '2026-06-08T10:15:30Z'
@@ -241,7 +241,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/CurrentUserResponse'
               example:
-                userUid: 3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e
+                userId: 3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e
                 keycloakUserId: 6d4a6249-75d8-4b8d-aee8-c2f6ddafaa11
                 email: user@example.com
                 firstName: Ivan
@@ -394,9 +394,9 @@ components:
           example: Bearer
     CurrentUserResponse:
       type: object
-      required: [userUid, keycloakUserId, email, roles, emailVerified]
+      required: [userId, keycloakUserId, email, roles, emailVerified]
       properties:
-        userUid:
+        userId:
           type: string
           format: uuid
         keycloakUserId:

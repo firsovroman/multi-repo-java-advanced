@@ -88,7 +88,7 @@ public class AuthService {
             return Mono.error(new InvalidAccessTokenException());
         }
         CurrentUserResponse response = new CurrentUserResponse()
-                .userUid(userUid)
+                .userId(userUid)
                 .keycloakUserId(jwt.getSubject())
                 .email(jwt.getClaimAsString("email"))
                 .firstName(jwt.getClaimAsString("given_name"))

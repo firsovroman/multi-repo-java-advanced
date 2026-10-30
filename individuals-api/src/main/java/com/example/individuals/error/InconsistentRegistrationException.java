@@ -15,7 +15,7 @@ public class InconsistentRegistrationException extends ApiException {
 
     public InconsistentRegistrationException(UUID userUid, Throwable cause) {
         super(HttpStatus.BAD_GATEWAY, ErrorCode.REGISTRATION_INCONSISTENT,
-                "Регистрация завершилась частично, обратитесь в поддержку", List.of("userUid: " + userUid), cause);
+                "Регистрация завершилась частично, обратитесь в поддержку", List.of("userId: " + userUid), cause);
         this.userUid = userUid;
     }
 

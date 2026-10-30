@@ -13,7 +13,7 @@
         "status": 200,
         "headers": { "Content-Type": "application/json" },
         "jsonBody": {
-          "userUid": "3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e",
+          "userId": "3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e",
           "email": "{{request.query.email}}",
           "firstName": "Ivan",
           "lastName": "Ivanov",
@@ -33,7 +33,7 @@
         "status": 200,
         "headers": { "Content-Type": "application/json" },
         "jsonBody": {
-          "userUid": "{{request.path.[3]}}",
+          "userId": "{{request.path.[3]}}",
           "email": "user@example.com",
           "firstName": "Ivan",
           "lastName": "Ivanov",

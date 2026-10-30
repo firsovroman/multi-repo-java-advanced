@@ -68,7 +68,7 @@
             "exec": [
               "pm.test('200 OK', () => pm.response.to.have.status(200));",
               "const body = pm.response.json();",
-              "pm.test('тот же userUid', () => pm.expect(body.userId).to.eql(pm.collectionVariables.get('userUid')));",
+              "pm.test('тот же userId', () => pm.expect(body.userId).to.eql(pm.collectionVariables.get('userUid')));",
               "pm.collectionVariables.set('accessToken', body.accessToken);",
               "pm.collectionVariables.set('refreshToken', body.refreshToken);"
             ]
@@ -121,7 +121,7 @@
             "exec": [
               "pm.test('200 OK', () => pm.response.to.have.status(200));",
               "const body = pm.response.json();",
-              "pm.test('userUid из токена', () => pm.expect(body.userUid).to.eql(pm.collectionVariables.get('userUid')));",
+              "pm.test('userId из токена', () => pm.expect(body.userId).to.eql(pm.collectionVariables.get('userUid')));",
               "pm.test('роль USER', () => pm.expect(body.roles).to.include('USER'));"
             ]
           }

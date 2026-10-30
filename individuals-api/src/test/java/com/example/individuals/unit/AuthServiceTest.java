@@ -144,7 +144,7 @@ class AuthServiceTest {
                     assertThat(e.getStatus()).isEqualTo(HttpStatus.BAD_GATEWAY);
                     assertThat(e.getErrorCode()).isEqualTo(ErrorCode.REGISTRATION_INCONSISTENT);
                     assertThat(e.getUserUid()).isEqualTo(USER_UID);
-                    assertThat(e.getDetails()).containsExactly("userUid: " + USER_UID);
+                    assertThat(e.getDetails()).containsExactly("userId: " + USER_UID);
                     assertThat(e.getCause()).isSameAs(keycloakDown);
                 }))
                 .verify();
@@ -264,7 +264,7 @@ class AuthServiceTest {
         CurrentUserResponse me = authService.currentUser(jwt).block();
 
         assertThat(me).isNotNull();
-        assertThat(me.getUserUid()).isEqualTo(USER_UID);
+        assertThat(me.getUserId()).isEqualTo(USER_UID);
         assertThat(me.getKeycloakUserId()).isEqualTo(KEYCLOAK_USER_ID);
         assertThat(me.getEmail()).isEqualTo(EMAIL);
         assertThat(me.getFirstName()).isEqualTo("Ivan");

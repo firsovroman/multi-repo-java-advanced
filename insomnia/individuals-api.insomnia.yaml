@@ -65,7 +65,7 @@ collection:
       afterResponse: |-
         insomnia.test('200 OK', () => insomnia.expect(insomnia.response.code).to.eql(200));
         const body = insomnia.response.json();
-        insomnia.test('тот же userUid', () => insomnia.expect(body.userId).to.eql(insomnia.baseEnvironment.get('userUid')));
+        insomnia.test('тот же userId', () => insomnia.expect(body.userId).to.eql(insomnia.baseEnvironment.get('userUid')));
         insomnia.baseEnvironment.set('accessToken', body.accessToken);
         insomnia.baseEnvironment.set('refreshToken', body.refreshToken);
   - name: 3. Refresh token
@@ -106,7 +106,7 @@ collection:
       afterResponse: |-
         insomnia.test('200 OK', () => insomnia.expect(insomnia.response.code).to.eql(200));
         const body = insomnia.response.json();
-        insomnia.test('userUid из токена', () => insomnia.expect(body.userUid).to.eql(insomnia.baseEnvironment.get('userUid')));
+        insomnia.test('userId из токена', () => insomnia.expect(body.userId).to.eql(insomnia.baseEnvironment.get('userUid')));
         insomnia.test('роль USER', () => insomnia.expect(body.roles).to.include('USER'));
   - name: Errors
     meta:
