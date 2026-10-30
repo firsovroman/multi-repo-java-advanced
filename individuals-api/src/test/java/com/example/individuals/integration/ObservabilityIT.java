@@ -45,7 +45,7 @@ class ObservabilityIT extends AbstractIntegrationTest {
         stubPersonRegistration(email);
         register(email);
 
-        ResponseEntity<String> response = http.get().uri("/actuator/prometheus").retrieve().toEntity(String.class);
+        ResponseEntity<String> response = http.get().uri("/actuator/prometheus").retrieve().toEntity(String.class).block();
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody())
@@ -61,7 +61,7 @@ class ObservabilityIT extends AbstractIntegrationTest {
 
     @Test
     void healthEndpointIsUp() {
-        ResponseEntity<String> response = http.get().uri("/actuator/health").retrieve().toEntity(String.class);
+        ResponseEntity<String> response = http.get().uri("/actuator/health").retrieve().toEntity(String.class).block();
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody()).contains("\"status\":\"UP\"");
@@ -118,9 +118,9 @@ class ObservabilityIT extends AbstractIntegrationTest {
 
         ResponseEntity<ErrorResponse> response = http.post().uri("/api/v1/auth/registration")
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(new RegistrationRequest(email, "Str@ngPass!", "Str@ngPass!", "Ivan", "Ivanov"))
+                .bodyValue(new RegistrationRequest(email, "Str@ngPass!", "Str@ngPass!", "Ivan", "Ivanov"))
                 .retrieve()
-                .toEntity(ErrorResponse.class);
+                .toEntity(ErrorResponse.class).block();
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(response.getBody()).isNotNull();
@@ -132,9 +132,9 @@ class ObservabilityIT extends AbstractIntegrationTest {
     private void register(String email) {
         ResponseEntity<String> response = http.post().uri("/api/v1/auth/registration")
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(new RegistrationRequest(email, "Str@ngPass!", "Str@ngPass!", "Ivan", "Ivanov"))
+                .bodyValue(new RegistrationRequest(email, "Str@ngPass!", "Str@ngPass!", "Ivan", "Ivanov"))
                 .retrieve()
-                .toEntity(String.class);
+                .toEntity(String.class).block();
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
     }
 }

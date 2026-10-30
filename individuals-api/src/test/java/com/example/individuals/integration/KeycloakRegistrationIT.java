@@ -16,7 +16,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
 
 import java.util.List;
 import java.util.UUID;
@@ -37,7 +37,7 @@ class KeycloakRegistrationIT extends AbstractIntegrationTest {
     private static Keycloak keycloakAdmin;
 
     @Autowired
-    private JwtDecoder jwtDecoder;
+    private ReactiveJwtDecoder jwtDecoder;
 
     @BeforeAll
     static void setUpAdminClient() {
@@ -77,9 +77,9 @@ class KeycloakRegistrationIT extends AbstractIntegrationTest {
 
         ResponseEntity<TokenResponse> response = http.post().uri("/api/v1/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(new LoginRequest(email, PASSWORD))
+                .bodyValue(new LoginRequest(email, PASSWORD))
                 .retrieve()
-                .toEntity(TokenResponse.class);
+                .toEntity(TokenResponse.class).block();
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         TokenResponse tokens = response.getBody();
@@ -88,7 +88,7 @@ class KeycloakRegistrationIT extends AbstractIntegrationTest {
         assertThat(tokens.getTokenType()).isEqualToIgnoringCase("Bearer");
         assertThat(tokens.getExpiresIn()).isEqualTo(300);
 
-        Jwt jwt = jwtDecoder.decode(tokens.getAccessToken());
+        Jwt jwt = jwtDecoder.decode(tokens.getAccessToken()).block();
         assertThat(jwt.getIssuer().toString()).endsWith("/realms/" + REALM);
         assertThat(jwt.getClaimAsString("user_uid")).isEqualTo(userUid.toString());
         assertThat(jwt.getClaimAsString("email")).isEqualTo(email);
@@ -102,9 +102,9 @@ class KeycloakRegistrationIT extends AbstractIntegrationTest {
 
         ResponseEntity<ErrorResponse> response = http.post().uri("/api/v1/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(new LoginRequest(email, "wrong-password"))
+                .bodyValue(new LoginRequest(email, "wrong-password"))
                 .retrieve()
-                .toEntity(ErrorResponse.class);
+                .toEntity(ErrorResponse.class).block();
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(response.getBody()).isNotNull();
@@ -121,9 +121,9 @@ class KeycloakRegistrationIT extends AbstractIntegrationTest {
 
         ResponseEntity<TokenResponse> response = http.post().uri("/api/v1/auth/refresh-token")
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(new RefreshTokenRequest(registered.getRefreshToken()))
+                .bodyValue(new RefreshTokenRequest(registered.getRefreshToken()))
                 .retrieve()
-                .toEntity(TokenResponse.class);
+                .toEntity(TokenResponse.class).block();
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody()).isNotNull();
@@ -141,7 +141,7 @@ class KeycloakRegistrationIT extends AbstractIntegrationTest {
         ResponseEntity<CurrentUserResponse> response = http.get().uri("/api/v1/auth/me")
                 .headers(headers -> headers.setBearerAuth(tokens.getAccessToken()))
                 .retrieve()
-                .toEntity(CurrentUserResponse.class);
+                .toEntity(CurrentUserResponse.class).block();
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         CurrentUserResponse me = response.getBody();
@@ -160,7 +160,7 @@ class KeycloakRegistrationIT extends AbstractIntegrationTest {
     void meWithoutTokenReturns401InErrorFormat() {
         ResponseEntity<ErrorResponse> response = http.get().uri("/api/v1/auth/me")
                 .retrieve()
-                .toEntity(ErrorResponse.class);
+                .toEntity(ErrorResponse.class).block();
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(response.getBody()).isNotNull();
@@ -178,9 +178,9 @@ class KeycloakRegistrationIT extends AbstractIntegrationTest {
 
         ResponseEntity<ErrorResponse> response = http.post().uri("/api/v1/auth/registration")
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(registrationRequest(email))
+                .bodyValue(registrationRequest(email))
                 .retrieve()
-                .toEntity(ErrorResponse.class);
+                .toEntity(ErrorResponse.class).block();
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(response.getBody()).isNotNull();
@@ -191,9 +191,9 @@ class KeycloakRegistrationIT extends AbstractIntegrationTest {
     private ResponseEntity<TokenResponse> register(String email) {
         return http.post().uri("/api/v1/auth/registration")
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(registrationRequest(email))
+                .bodyValue(registrationRequest(email))
                 .retrieve()
-                .toEntity(TokenResponse.class);
+                .toEntity(TokenResponse.class).block();
     }
 
     private static RegistrationRequest registrationRequest(String email) {

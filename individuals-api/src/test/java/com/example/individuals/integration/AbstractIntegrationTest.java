@@ -12,7 +12,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.web.client.RestClient;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 
 import java.util.UUID;
 
@@ -55,15 +56,14 @@ public abstract class AbstractIntegrationTest {
     @LocalServerPort
     protected int port;
 
-    protected RestClient http;
+    protected WebClient http;
 
     @BeforeEach
     void setUpClient() {
-        http = RestClient.builder()
+        http = WebClient.builder()
                 .baseUrl("http://localhost:" + port)
-                .defaultStatusHandler(HttpStatusCode::isError, (request, response) -> {
-                    // ошибки проверяются по статусу и телу в самих тестах
-                })
+                // ошибки проверяются по статусу и телу в самих тестах
+                .defaultStatusHandler(HttpStatusCode::isError, response -> Mono.empty())
                 .build();
     }
 
