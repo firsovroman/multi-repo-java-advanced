@@ -1,0 +1,79 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: person-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5434/person}
+    username: ${SPRING_DATASOURCE_USERNAME:person}
+    password: ${SPRING_DATASOURCE_PASSWORD:person}
+  # История остаётся в person.flyway_schema_history: там её оставлял контейнер person-migrations
+  flyway:
+    schemas: person
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: person
+        # В V001 колонки TIMESTAMP без часового пояса: Instant хранится в них как UTC
+        jdbc:
+          time_zone: UTC
+        type:
+          preferred_instant_jdbc_type: TIMESTAMP
+      org:
+        hibernate:
+          envers:
+            audit_table_suffix: _aud
+            revision_field_name: rev
+            revision_type_field_name: revtype
+            modified_flag_suffix: _mod
+            modified_column_naming_strategy: improved
+            do_not_audit_optimistic_locking_field: false
+  mvc:
+    problemdetails:
+      enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "health,info,prometheus,metrics"
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: "readinessState,db"
+  metrics:
+    tags:
+      application: person-service
+    distribution:
+      percentiles-histogram:
+        "[http.server.requests]": true
+        "[person.users.operation]": true
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+  # Метрики забирает Prometheus, журналы — stdout: OTLP используется только для трасс
+  otlp:
+    metrics:
+      export:
+        enabled: false
+  logging:
+    export:
+      otlp:
+        enabled: false
+
+logging:
+  structured:
+    format:
+      console: ecs
+    ecs:
+      service:
+        name: person-service

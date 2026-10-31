@@ -3,8 +3,8 @@ name: person-service
 meta:
   id: wrk_person_service
   created: 1761436800000
-  modified: 1761436800000
-  description: "Ручная проверка контракта person-service (person-service/openapi/person-service.yaml). На локальном стенде на порту 8082 отвечает заглушка WireMock (infra/wiremock). Регистрация сохраняет userUid в переменные окружения."
+  modified: 1793448000000
+  description: "Ручная проверка person-service (person-service/openapi/person-service.yaml) на локальном стенде, порт 8082. Регистрация и создание сохраняют идентификаторы в переменные окружения. Ошибки — application/problem+json, код в поле errorCode."
 collection:
   - name: 1. Registration
     meta:
@@ -71,6 +71,163 @@ collection:
         const body = insomnia.response.json();
         insomnia.test('тот же email', () => insomnia.expect(body.email).to.eql(insomnia.baseEnvironment.get('email')));
         insomnia.test('userId', () => insomnia.expect(body.userId).to.be.a('string'));
+  - name: Users
+    meta:
+      id: fld_users
+      created: 1793448000000
+      modified: 1793448000000
+      sortKey: -750
+    children:
+      - name: 1. Create
+        meta:
+          id: req_users_create
+          created: 1793448000000
+          modified: 1793448000000
+          sortKey: -1000
+        method: POST
+        url: "{{ _.baseUrl }}/api/v1/users"
+        headers:
+          - name: Content-Type
+            value: application/json
+        body:
+          mimeType: application/json
+          text: |-
+            {
+              "email": "{{ _.userEmail }}",
+              "firstName": "Ivan",
+              "lastName": "Ivanov",
+              "address": {
+                "countryAlpha3": "RUS",
+                "countryAlpha2": "RU",
+                "city": "Moscow",
+                "state": "Moscow",
+                "zipCode": "101000",
+                "addressLine": "Tverskaya 1"
+              },
+              "individual": {
+                "passportNumber": "4510123456",
+                "phoneNumber": "+79991234567"
+              }
+            }
+        scripts:
+          preRequest: |-
+            insomnia.baseEnvironment.set('userEmail', 'user-' + Date.now() + '@example.com');
+          afterResponse: |-
+            insomnia.test('201 Created', () => insomnia.expect(insomnia.response.code).to.eql(201));
+            const body = insomnia.response.json();
+            insomnia.test('filled=true, status=NEW', () => {
+              insomnia.expect(body.filled).to.eql(true);
+              insomnia.expect(body.individual.status).to.eql('NEW');
+            });
+            insomnia.baseEnvironment.set('id', body.id);
+      - name: 2. Get by id
+        meta:
+          id: req_users_get
+          created: 1793448000000
+          modified: 1793448000000
+          sortKey: -900
+        method: GET
+        url: "{{ _.baseUrl }}/api/v1/users/{{ _.id }}"
+        scripts:
+          afterResponse: |-
+            insomnia.test('200 OK', () => insomnia.expect(insomnia.response.code).to.eql(200));
+            insomnia.test('тот же id', () => insomnia.expect(insomnia.response.json().id).to.eql(insomnia.baseEnvironment.get('id')));
+      - name: 3. Get by email (другой регистр)
+        meta:
+          id: req_users_by_email
+          created: 1793448000000
+          modified: 1793448000000
+          sortKey: -800
+        method: GET
+        url: "{{ _.baseUrl }}/api/v1/users/by-email"
+        parameters:
+          - name: email
+            value: "{{ _.userEmail }}"
+        scripts:
+          afterResponse: |-
+            insomnia.test('200 OK', () => insomnia.expect(insomnia.response.code).to.eql(200));
+            insomnia.test('тот же id', () => insomnia.expect(insomnia.response.json().id).to.eql(insomnia.baseEnvironment.get('id')));
+      - name: 4. Patch
+        meta:
+          id: req_users_patch
+          created: 1793448000000
+          modified: 1793448000000
+          sortKey: -700
+        method: PATCH
+        url: "{{ _.baseUrl }}/api/v1/users/{{ _.id }}"
+        headers:
+          - name: Content-Type
+            value: application/json
+          - name: If-Match
+            value: '"0"'
+        body:
+          mimeType: application/json
+          text: |-
+            {
+              "firstName": "Petr",
+              "address": { "city": "Kazan" },
+              "individual": { "phoneNumber": "+79990000000" }
+            }
+        scripts:
+          afterResponse: |-
+            insomnia.test('200 OK', () => insomnia.expect(insomnia.response.code).to.eql(200));
+            const body = insomnia.response.json();
+            insomnia.test('версия выросла', () => insomnia.expect(body.version).to.eql(1));
+            insomnia.test('поля изменены', () => {
+              insomnia.expect(body.firstName).to.eql('Petr');
+              insomnia.expect(body.address.city).to.eql('Kazan');
+              insomnia.expect(body.individual.phoneNumber).to.eql('+79990000000');
+            });
+      - name: "5. Patch: устаревшая версия (412)"
+        meta:
+          id: req_users_patch_stale
+          created: 1793448000000
+          modified: 1793448000000
+          sortKey: -600
+        method: PATCH
+        url: "{{ _.baseUrl }}/api/v1/users/{{ _.id }}"
+        headers:
+          - name: Content-Type
+            value: application/json
+          - name: If-Match
+            value: '"0"'
+        body:
+          mimeType: application/json
+          text: |-
+            {
+              "firstName": "Sidor"
+            }
+        scripts:
+          afterResponse: |-
+            insomnia.test('412 VERSION_MISMATCH', () => {
+              insomnia.expect(insomnia.response.code).to.eql(412);
+              insomnia.expect(insomnia.response.json().errorCode).to.eql('VERSION_MISMATCH');
+            });
+      - name: 6. Delete
+        meta:
+          id: req_users_delete
+          created: 1793448000000
+          modified: 1793448000000
+          sortKey: -500
+        method: DELETE
+        url: "{{ _.baseUrl }}/api/v1/users/{{ _.id }}"
+        scripts:
+          afterResponse: |-
+            insomnia.test('204 No Content', () => insomnia.expect(insomnia.response.code).to.eql(204));
+      - name: "7. Delete: повторно (404)"
+        meta:
+          id: req_users_delete_again
+          created: 1793448000000
+          modified: 1793448000000
+          sortKey: -400
+        method: DELETE
+        url: "{{ _.baseUrl }}/api/v1/users/{{ _.id }}"
+        scripts:
+          afterResponse: |-
+            insomnia.test('404 USER_NOT_FOUND', () => {
+              insomnia.expect(insomnia.response.code).to.eql(404);
+              insomnia.expect(insomnia.response.json().errorCode).to.eql('USER_NOT_FOUND');
+            });
   - name: Errors
     meta:
       id: fld_person_errors
@@ -97,11 +254,11 @@ collection:
             }
         scripts:
           afterResponse: |-
-            insomnia.test('400 BAD_REQUEST', () => {
+            insomnia.test('400 VALIDATION_ERROR', () => {
               insomnia.expect(insomnia.response.code).to.eql(400);
-              insomnia.expect(insomnia.response.json().error).to.eql('BAD_REQUEST');
+              insomnia.expect(insomnia.response.json().errorCode).to.eql('VALIDATION_ERROR');
             });
-      - name: "Registration: email занят (409)"
+      - name: "Registration: email занят в другом регистре (409)"
         meta:
           id: req_person_err_conflict
           created: 1761436800000
@@ -116,17 +273,22 @@ collection:
           mimeType: application/json
           text: |-
             {
-              "email": "taken@example.com",
+              "email": "{{ _.email }}",
               "firstName": "Ivan",
               "lastName": "Ivanov"
             }
         scripts:
+          preRequest: |-
+            const email = insomnia.baseEnvironment.get('email');
+            if (email) {
+              insomnia.baseEnvironment.set('email', email.toUpperCase());
+            }
           afterResponse: |-
-            insomnia.test('409 CONFLICT', () => {
+            insomnia.test('409 EMAIL_ALREADY_EXISTS', () => {
               insomnia.expect(insomnia.response.code).to.eql(409);
-              insomnia.expect(insomnia.response.json().error).to.eql('CONFLICT');
+              insomnia.expect(insomnia.response.json().errorCode).to.eql('EMAIL_ALREADY_EXISTS');
             });
-      - name: "Get by userUid: не найден (404, только реальный сервис)"
+      - name: "Get by userUid: не найден (404)"
         meta:
           id: req_person_err_not_found
           created: 1761436800000
@@ -136,18 +298,51 @@ collection:
         url: "{{ _.baseUrl }}/api/v1/persons/00000000-0000-0000-0000-000000000000"
         scripts:
           afterResponse: |-
-            insomnia.test('404 NOT_FOUND', () => {
+            insomnia.test('404 USER_NOT_FOUND', () => {
               insomnia.expect(insomnia.response.code).to.eql(404);
-              insomnia.expect(insomnia.response.json().error).to.eql('NOT_FOUND');
+              insomnia.expect(insomnia.response.json().errorCode).to.eql('USER_NOT_FOUND');
+            });
+      - name: "Create: страны нет в справочнике (400)"
+        meta:
+          id: req_users_err_country
+          created: 1793448000000
+          modified: 1793448000000
+          sortKey: -700
+        method: POST
+        url: "{{ _.baseUrl }}/api/v1/users"
+        headers:
+          - name: Content-Type
+            value: application/json
+        body:
+          mimeType: application/json
+          text: |-
+            {
+              "email": "no-country@example.com",
+              "firstName": "Ivan",
+              "lastName": "Ivanov",
+              "address": {
+                "countryAlpha3": "ZZZ",
+                "countryAlpha2": "ZZ",
+                "city": "Nowhere",
+                "addressLine": "Unknown 1"
+              }
+            }
+        scripts:
+          afterResponse: |-
+            insomnia.test('400 COUNTRY_NOT_FOUND', () => {
+              insomnia.expect(insomnia.response.code).to.eql(400);
+              insomnia.expect(insomnia.response.json().errorCode).to.eql('COUNTRY_NOT_FOUND');
             });
 environments:
   name: Base Environment
   meta:
     id: env_person_service_base
     created: 1761436800000
-    modified: 1761436800000
+    modified: 1793448000000
     isPrivate: false
   data:
     baseUrl: http://localhost:8082
     email: ""
     userUid: ""
+    userEmail: ""
+    id: ""

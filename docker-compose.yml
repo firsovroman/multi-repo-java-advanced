@@ -45,14 +45,39 @@ services:
       retries: 30
       start_period: 30s
 
-  # Заглушка person-service по контракту person-service/openapi/person-service.yaml
+  # Заглушка person-service: только для запуска без БД (docker compose --profile stub up person-service-stub).
+  # Порт 8082 занят настоящим сервисом, поэтому вместе они не запускаются
   person-service-stub:
     image: wiremock/wiremock:3.13.2
+    profiles: ["stub"]
     command: ["--disable-http2-plain", "--verbose"]
     volumes:
       - ./infra/wiremock:/home/wiremock:ro
     ports:
       - "8082:8080"
+
+  person-service:
+    build:
+      context: ./person-service
+    depends_on:
+      person-postgres:
+        condition: service_healthy
+      tempo:
+        condition: service_started
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:postgresql://person-postgres:5432/person
+      SPRING_DATASOURCE_USERNAME: person
+      SPRING_DATASOURCE_PASSWORD: person
+    ports:
+      - "8082:8082"
+    healthcheck:
+      # В образе JRE нет wget и curl, зато есть bash
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8082 && printf 'GET /actuator/health/readiness HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '\"UP\"' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
 
   person-postgres:
     image: postgres:18
@@ -68,25 +93,14 @@ services:
       timeout: 5s
       retries: 10
 
-  # Применяет миграции будущего person-service к person-postgres и завершается
-  person-migrations:
-    image: flyway/flyway:12.4.0
-    command: ["-url=jdbc:postgresql://person-postgres:5432/person", "-user=person", "-password=person",
-              "-schemas=person", "-locations=filesystem:/flyway/sql", "migrate"]
-    depends_on:
-      person-postgres:
-        condition: service_healthy
-    volumes:
-      - ./person-service/src/main/resources/db/migration:/flyway/sql:ro
-
   individuals-api:
     build:
       context: ./individuals-api
     depends_on:
       keycloak:
         condition: service_healthy
-      person-service-stub:
-        condition: service_started
+      person-service:
+        condition: service_healthy
       prometheus:
         condition: service_started
       tempo:

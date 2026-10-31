@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.example"
-version = libs.versions.person.client.get()
+version = libs.versions.person.client.release.get()
 description = "HTTP-клиент и DTO person-service, сгенерированные из OpenAPI"
 
 java {
@@ -72,6 +72,10 @@ tasks.compileJava {
     dependsOn(tasks.openApiValidate, tasks.openApiGenerate)
 }
 
+tasks.withType<JavaCompile> {
+    options.encoding = "UTF-8"
+}
+
 tasks.named("sourcesJar") {
     dependsOn(tasks.openApiGenerate)
 }
@@ -92,10 +96,14 @@ publishing {
     repositories {
         // Nexus подключается только конфигурацией: -PnexusUrl=... или NEXUS_URL (+ логин/пароль)
         val nexusUrl = providers.gradleProperty("nexusUrl").orElse(providers.environmentVariable("NEXUS_URL"))
+        // Репозиторий выбирается по суффиксу версии: снимки уходят в maven-snapshots
+        val nexusSnapshotsUrl = providers.gradleProperty("nexusSnapshotsUrl")
+            .orElse(providers.environmentVariable("NEXUS_SNAPSHOTS_URL"))
+            .orElse(nexusUrl.map { it.replace("maven-releases", "maven-snapshots") })
         if (nexusUrl.isPresent) {
             maven {
                 name = "nexus"
-                url = uri(nexusUrl.get())
+                url = uri(if (version.toString().endsWith("-SNAPSHOT")) nexusSnapshotsUrl.get() else nexusUrl.get())
                 isAllowInsecureProtocol = true
                 credentials {
                     username = providers.gradleProperty("nexusUsername").orElse(providers.environmentVariable("NEXUS_USERNAME")).orNull

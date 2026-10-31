@@ -2,7 +2,7 @@ spring:
   http:
     serviceclient:
       person-service:
-        base-url: http://person-service-stub:8080
+        base-url: http://person-service:8082
 
 app:
   keycloak:

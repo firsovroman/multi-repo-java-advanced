@@ -1,0 +1,252 @@
+{
+  "info": {
+    "name": "person-service",
+    "description": "Ручная проверка person-service на локальном стенде, порт 8082. Создание сохраняет идентификатор в переменные коллекции. Ошибки — application/problem+json, код в поле errorCode.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8082" },
+    { "key": "email", "value": "" },
+    { "key": "userUid", "value": "" },
+    { "key": "id", "value": "" }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!pm.collectionVariables.get('email')) {",
+          "  pm.collectionVariables.set('email', 'person-' + Date.now() + '@example.com');",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Persons",
+      "item": [
+        {
+          "name": "1. Registration",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('userUid', pm.response.json().userId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/v1/persons/registration",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"firstName\": \"Ivan\",\n  \"lastName\": \"Ivanov\"\n}"
+            }
+          }
+        },
+        {
+          "name": "2. Get by userUid",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('тот же userId', () => pm.expect(pm.response.json().userId).to.eql(pm.collectionVariables.get('userUid')));"
+                ]
+              }
+            }
+          ],
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/persons/{{userUid}}" }
+        },
+        {
+          "name": "3. Get by email",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('тот же userId', () => pm.expect(pm.response.json().userId).to.eql(pm.collectionVariables.get('userUid')));"
+                ]
+              }
+            }
+          ],
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/persons/by-email?email={{email}}" }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "1. Create",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.collectionVariables.set('userEmail', 'user-' + Date.now() + '@example.com');"]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('Location', () => pm.response.to.have.header('Location'));",
+                  "const body = pm.response.json();",
+                  "pm.test('filled=true, status=NEW', () => {",
+                  "  pm.expect(body.filled).to.eql(true);",
+                  "  pm.expect(body.individual.status).to.eql('NEW');",
+                  "});",
+                  "pm.collectionVariables.set('id', body.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/v1/users",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{userEmail}}\",\n  \"firstName\": \"Ivan\",\n  \"lastName\": \"Ivanov\",\n  \"address\": {\n    \"countryAlpha3\": \"RUS\",\n    \"countryAlpha2\": \"RU\",\n    \"city\": \"Moscow\",\n    \"state\": \"Moscow\",\n    \"zipCode\": \"101000\",\n    \"addressLine\": \"Tverskaya 1\"\n  },\n  \"individual\": {\n    \"passportNumber\": \"4510123456\",\n    \"phoneNumber\": \"+79991234567\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "2. Get by id",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('ETag', () => pm.response.to.have.header('ETag'));"
+                ]
+              }
+            }
+          ],
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/users/{{id}}" }
+        },
+        {
+          "name": "3. Get by email",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('200 OK', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ],
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/users/by-email?email={{userEmail}}" }
+        },
+        {
+          "name": "4. Patch",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('версия выросла', () => pm.expect(body.version).to.eql(1));",
+                  "pm.test('поля изменены', () => {",
+                  "  pm.expect(body.firstName).to.eql('Petr');",
+                  "  pm.expect(body.address.city).to.eql('Kazan');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "If-Match", "value": "\"0\"" }
+            ],
+            "url": "{{baseUrl}}/api/v1/users/{{id}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Petr\",\n  \"address\": { \"city\": \"Kazan\" },\n  \"individual\": { \"phoneNumber\": \"+79990000000\" }\n}"
+            }
+          }
+        },
+        {
+          "name": "5. Patch: устаревшая версия (412)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('412', () => pm.response.to.have.status(412));",
+                  "pm.test('VERSION_MISMATCH', () => pm.expect(pm.response.json().errorCode).to.eql('VERSION_MISMATCH'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "If-Match", "value": "\"0\"" }
+            ],
+            "url": "{{baseUrl}}/api/v1/users/{{id}}",
+            "body": { "mode": "raw", "raw": "{\n  \"firstName\": \"Sidor\"\n}" }
+          }
+        },
+        {
+          "name": "6. Delete",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('204 No Content', () => pm.response.to.have.status(204));"]
+              }
+            }
+          ],
+          "request": { "method": "DELETE", "url": "{{baseUrl}}/api/v1/users/{{id}}" }
+        },
+        {
+          "name": "7. Delete: повторно (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.response.to.have.status(404));",
+                  "pm.test('USER_NOT_FOUND', () => pm.expect(pm.response.json().errorCode).to.eql('USER_NOT_FOUND'));"
+                ]
+              }
+            }
+          ],
+          "request": { "method": "DELETE", "url": "{{baseUrl}}/api/v1/users/{{id}}" }
+        }
+      ]
+    },
+    {
+      "name": "Actuator",
+      "item": [
+        { "name": "Readiness", "request": { "method": "GET", "url": "{{baseUrl}}/actuator/health/readiness" } },
+        { "name": "Prometheus", "request": { "method": "GET", "url": "{{baseUrl}}/actuator/prometheus" } }
+      ]
+    }
+  ]
+}

@@ -5,13 +5,19 @@ info:
     Контракт сервиса доменных пользователей. person-service — источник доменной истины
     о пользователе; его идентификатор `userId` является сквозным идентификатором платформы.
     Операции этого контракта не переименовываются без крайней необходимости.
-  version: 1.0.0
+
+    Группа `persons` — внутренний контракт для individuals-api, группа `users` — CRUD агрегата
+    user + address + individual. `userId` в ответах `persons` и `id` в ответах `users` — одно и то же значение.
+    Все ошибки возвращаются как `application/problem+json` (RFC 9457).
+  version: 1.1.0
 servers:
   - url: http://localhost:8082
     description: Локальный запуск
 tags:
   - name: persons
     description: Доменные пользователи
+  - name: users
+    description: CRUD агрегата пользователя
 paths:
   /api/v1/persons/registration:
     post:
@@ -41,19 +47,7 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '409':
-          description: Пользователь с таким email уже существует
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                timestamp: '2026-06-08T10:15:30Z'
-                path: /api/v1/persons/registration
-                status: 409
-                error: CONFLICT
-                message: Пользователь с таким email уже существует
-                traceId: 803b448a0489f84084905d3093480352
-                details: []
+          $ref: '#/components/responses/EmailConflict'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/persons/{userUid}:
@@ -82,6 +76,8 @@ paths:
                 lastName: Ivanov
                 filled: false
                 createdAt: '2026-06-08T10:15:30Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -98,6 +94,8 @@ paths:
           schema:
             type: string
             format: email
+            minLength: 1
+            maxLength: 1024
       responses:
         '200':
           description: Пользователь найден
@@ -112,55 +110,361 @@ paths:
                 lastName: Ivanov
                 filled: false
                 createdAt: '2026-06-08T10:15:30Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/users:
+    post:
+      tags: [users]
+      operationId: createUser
+      summary: Создать агрегат пользователя
+      description: >-
+        Создаёт пользователя вместе с адресом и индивидуальными данными. Без `address` или `individual`
+        пользователь создаётся с `filled=false`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+            example:
+              email: user@example.com
+              firstName: Ivan
+              lastName: Ivanov
+              address:
+                countryAlpha3: RUS
+                countryAlpha2: RU
+                city: Moscow
+                state: Moscow
+                zipCode: '101000'
+                addressLine: Tverskaya 1
+              individual:
+                passportNumber: '4510123456'
+                phoneNumber: '+79991234567'
+      responses:
+        '201':
+          description: Пользователь создан
+          headers:
+            Location:
+              description: Адрес созданного пользователя
+              schema:
+                type: string
+              example: /api/v1/users/3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+              example:
+                $ref: '#/components/examples/UserResponse/value'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/EmailConflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/users/by-email:
+    get:
+      tags: [users]
+      operationId: getUserByEmail
+      summary: Найти пользователя по email без учёта регистра
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema:
+            type: string
+            format: email
+            minLength: 1
+            maxLength: 1024
+          example: User@Example.com
+      responses:
+        '200':
+          description: Пользователь найден
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+              example:
+                $ref: '#/components/examples/UserResponse/value'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/v1/users/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [users]
+      operationId: getUserById
+      summary: Получить агрегат пользователя
+      responses:
+        '200':
+          description: Пользователь найден
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+              example:
+                $ref: '#/components/examples/UserResponse/value'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      tags: [users]
+      operationId: updateUser
+      summary: Частично обновить агрегат пользователя
+      description: >-
+        Непереданное поле не меняется. Явный `null` или пустая строка в обязательном поле — 400.
+        Явный `null` в необязательном поле (`state`, `zipCode`, `passportNumber`, `phoneNumber`)
+        равнозначен его отсутствию: очистка этих полей в контракте не предусмотрена. Запрос, который ничего
+        не меняет, возвращает 200 и не увеличивает `version`.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: >-
+            Ожидаемая версия пользователя в виде `"<version>"` или `*`. Если заголовка нет,
+            действует только оптимистическая блокировка внутри транзакции.
+          schema:
+            type: string
+          example: '"3"'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+            example:
+              firstName: Petr
+              address:
+                city: Kazan
+              individual:
+                phoneNumber: '+79990000000'
+      responses:
+        '200':
+          description: Пользователь обновлён
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+              example:
+                $ref: '#/components/examples/UserResponse/value'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [users]
+      operationId: deleteUser
+      summary: Удалить агрегат пользователя
+      description: Физически удаляет пользователя, его адрес и индивидуальные данные. В аудите остаются ревизии DEL.
+      responses:
+        '204':
+          description: Пользователь удалён
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
 components:
+  headers:
+    ETag:
+      description: Версия пользователя в виде `"<version>"`
+      schema:
+        type: string
+      example: '"3"'
+  examples:
+    UserResponse:
+      summary: Заполненный пользователь
+      value:
+        id: 3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e
+        email: user@example.com
+        firstName: Ivan
+        lastName: Ivanov
+        filled: true
+        createdAt: '2026-06-08T10:15:30Z'
+        updatedAt: '2026-06-08T10:15:30Z'
+        version: 0
+        address:
+          id: 8f7b1e0a-6a5d-4c55-9d2e-0a3c1f1e2b77
+          countryAlpha3: RUS
+          countryAlpha2: RU
+          city: Moscow
+          state: Moscow
+          zipCode: '101000'
+          addressLine: Tverskaya 1
+        individual:
+          id: 1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f
+          passportNumber: '4510123456'
+          phoneNumber: '+79991234567'
+          status: NEW
+          verifiedAt: null
+          archivedAt: null
   responses:
     BadRequest:
       description: Некорректный запрос
       content:
-        application/json:
+        application/problem+json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
-          example:
-            timestamp: '2026-06-08T10:15:30Z'
-            path: /api/v1/persons/registration
-            status: 400
-            error: BAD_REQUEST
-            message: Ошибка валидации запроса
-            traceId: 803b448a0489f84084905d3093480352
-            details:
-              - 'email: должно иметь формат адреса электронной почты'
+            $ref: '#/components/schemas/ProblemResponse'
+          examples:
+            validation:
+              summary: Нарушены ограничения запроса
+              value:
+                type: https://example.org/problems/validation-error
+                title: Ошибка валидации
+                status: 400
+                detail: Запрос не прошёл проверку
+                instance: /api/v1/persons/registration
+                errorCode: VALIDATION_ERROR
+                traceId: 803b448a0489f84084905d3093480352
+                errors:
+                  - field: email
+                    message: должно иметь формат адреса электронной почты
+            malformed:
+              summary: Тело или путь не разбираются
+              value:
+                type: https://example.org/problems/malformed-request
+                title: Некорректный запрос
+                status: 400
+                detail: Запрос не удалось разобрать
+                instance: /api/v1/users/not-a-uuid
+                errorCode: MALFORMED_REQUEST
+                traceId: 803b448a0489f84084905d3093480352
+            countryNotFound:
+              summary: Страны нет в справочнике
+              value:
+                type: https://example.org/problems/country-not-found
+                title: Некорректный запрос
+                status: 400
+                detail: Страна не найдена в справочнике
+                instance: /api/v1/users
+                errorCode: COUNTRY_NOT_FOUND
+                traceId: 803b448a0489f84084905d3093480352
+            countryMismatch:
+              summary: alpha2 не соответствует alpha3
+              value:
+                type: https://example.org/problems/country-mismatch
+                title: Некорректный запрос
+                status: 400
+                detail: countryAlpha2 не соответствует countryAlpha3
+                instance: /api/v1/users
+                errorCode: COUNTRY_MISMATCH
+                traceId: 803b448a0489f84084905d3093480352
     NotFound:
       description: Пользователь не найден
       content:
-        application/json:
+        application/problem+json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
+            $ref: '#/components/schemas/ProblemResponse'
           example:
-            timestamp: '2026-06-08T10:15:30Z'
-            path: /api/v1/persons/3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e
+            type: https://example.org/problems/user-not-found
+            title: Не найдено
             status: 404
-            error: NOT_FOUND
-            message: Пользователь не найден
+            detail: Пользователь не найден
+            instance: /api/v1/persons/3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e
+            errorCode: USER_NOT_FOUND
             traceId: 803b448a0489f84084905d3093480352
-            details: []
+    EmailConflict:
+      description: Пользователь с таким email уже существует
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemResponse'
+          example:
+            type: https://example.org/problems/email-already-exists
+            title: Конфликт данных
+            status: 409
+            detail: Пользователь с таким email уже существует
+            instance: /api/v1/persons/registration
+            errorCode: EMAIL_ALREADY_EXISTS
+            traceId: 803b448a0489f84084905d3093480352
+    Conflict:
+      description: Email занят или пользователя параллельно изменили
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemResponse'
+          examples:
+            emailAlreadyExists:
+              summary: Email занят
+              value:
+                type: https://example.org/problems/email-already-exists
+                title: Конфликт данных
+                status: 409
+                detail: Пользователь с таким email уже существует
+                instance: /api/v1/users/3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e
+                errorCode: EMAIL_ALREADY_EXISTS
+                traceId: 803b448a0489f84084905d3093480352
+            concurrentUpdate:
+              summary: Параллельное изменение
+              value:
+                type: https://example.org/problems/concurrent-update
+                title: Конфликт данных
+                status: 409
+                detail: Пользователь был изменён параллельно, повторите запрос
+                instance: /api/v1/users/3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e
+                errorCode: CONCURRENT_UPDATE
+                traceId: 803b448a0489f84084905d3093480352
+    PreconditionFailed:
+      description: If-Match не совпал с текущей версией
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemResponse'
+          example:
+            type: https://example.org/problems/version-mismatch
+            title: Версия не совпала
+            status: 412
+            detail: Версия в If-Match не совпала с текущей
+            instance: /api/v1/users/3d6f3532-8b97-4c7b-8a2a-608b6aeb3a7e
+            errorCode: VERSION_MISMATCH
+            traceId: 803b448a0489f84084905d3093480352
     InternalError:
       description: Внутренняя ошибка сервиса
       content:
-        application/json:
+        application/problem+json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
+            $ref: '#/components/schemas/ProblemResponse'
           example:
-            timestamp: '2026-06-08T10:15:30Z'
-            path: /api/v1/persons/registration
+            type: https://example.org/problems/internal-error
+            title: Внутренняя ошибка
             status: 500
-            error: INTERNAL_SERVER_ERROR
-            message: Внутренняя ошибка сервиса
+            detail: Внутренняя ошибка сервиса
+            instance: /api/v1/persons/registration
+            errorCode: INTERNAL_ERROR
             traceId: 803b448a0489f84084905d3093480352
-            details: []
   schemas:
     PersonRegistrationRequest:
       type: object
@@ -169,6 +473,7 @@ components:
         email:
           type: string
           format: email
+          minLength: 1
           maxLength: 1024
         firstName:
           type: string
@@ -206,9 +511,223 @@ components:
         createdAt:
           type: string
           format: date-time
+    CreateUserRequest:
+      type: object
+      required: [email, firstName, lastName]
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 1
+          maxLength: 1024
+        firstName:
+          type: string
+          minLength: 1
+          maxLength: 64
+        lastName:
+          type: string
+          minLength: 1
+          maxLength: 64
+        address:
+          $ref: '#/components/schemas/AddressRequest'
+        individual:
+          $ref: '#/components/schemas/IndividualRequest'
+    AddressRequest:
+      type: object
+      required: [countryAlpha3, countryAlpha2, city, addressLine]
+      properties:
+        countryAlpha3:
+          type: string
+          pattern: '^[A-Z]{3}$'
+          description: Страна ищется по этому коду
+        countryAlpha2:
+          type: string
+          pattern: '^[A-Z]{2}$'
+          description: Должен соответствовать countryAlpha3
+        city:
+          type: string
+          minLength: 1
+          maxLength: 64
+        state:
+          type: string
+          maxLength: 64
+        zipCode:
+          type: string
+          maxLength: 32
+        addressLine:
+          type: string
+          minLength: 1
+          maxLength: 128
+    IndividualRequest:
+      type: object
+      properties:
+        passportNumber:
+          type: string
+          minLength: 1
+          maxLength: 32
+        phoneNumber:
+          type: string
+          maxLength: 32
+          pattern: '^\+[1-9][0-9]{1,14}$'
+          description: Телефон в формате E.164
+    UpdateUserRequest:
+      type: object
+      description: Все поля необязательны; непереданное поле не меняется
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 1
+          maxLength: 1024
+        firstName:
+          type: string
+          minLength: 1
+          maxLength: 64
+        lastName:
+          type: string
+          minLength: 1
+          maxLength: 64
+        address:
+          $ref: '#/components/schemas/UpdateAddressRequest'
+        individual:
+          $ref: '#/components/schemas/IndividualRequest'
+    UpdateAddressRequest:
+      type: object
+      description: >-
+        Те же поля, что в AddressRequest, но необязательные. Если у пользователя ещё нет адреса,
+        обязательные поля AddressRequest должны быть переданы, иначе 400.
+      properties:
+        countryAlpha3:
+          type: string
+          pattern: '^[A-Z]{3}$'
+        countryAlpha2:
+          type: string
+          pattern: '^[A-Z]{2}$'
+        city:
+          type: string
+          minLength: 1
+          maxLength: 64
+        state:
+          type: string
+          maxLength: 64
+        zipCode:
+          type: string
+          maxLength: 32
+        addressLine:
+          type: string
+          minLength: 1
+          maxLength: 128
+    UserResponse:
+      type: object
+      required: [id, email, firstName, lastName, filled, createdAt, updatedAt, version]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: То же значение, что userId в группе persons и user_uid в Keycloak
+        email:
+          type: string
+          format: email
+        firstName:
+          type: string
+        lastName:
+          type: string
+        filled:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        version:
+          type: integer
+          format: int64
+        address:
+          $ref: '#/components/schemas/AddressResponse'
+        individual:
+          $ref: '#/components/schemas/IndividualResponse'
+    AddressResponse:
+      type: object
+      required: [id, countryAlpha3, countryAlpha2, city, addressLine]
+      properties:
+        id:
+          type: string
+          format: uuid
+        countryAlpha3:
+          type: string
+        countryAlpha2:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        zipCode:
+          type: string
+        addressLine:
+          type: string
+    IndividualResponse:
+      type: object
+      required: [id, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        passportNumber:
+          type: string
+        phoneNumber:
+          type: string
+        status:
+          type: string
+          description: Строка без закрытого набора значений; при создании — NEW
+        verifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+        archivedAt:
+          type: string
+          format: date-time
+          nullable: true
+    ProblemResponse:
+      type: object
+      description: Ошибка в формате RFC 9457 с расширениями errorCode, traceId и errors
+      required: [type, title, status, instance, errorCode, traceId]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        errorCode:
+          type: string
+          description: Код ошибки для людей, журналов и тестов
+        traceId:
+          type: string
+          description: Идентификатор трассы запроса
+        errors:
+          type: array
+          description: Нарушенные ограничения; только для VALIDATION_ERROR
+          items:
+            $ref: '#/components/schemas/FieldViolation'
+    FieldViolation:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+        message:
+          type: string
     ErrorResponse:
       type: object
-      description: Единая схема ошибки для всех сервисов платформы
+      deprecated: true
+      description: >-
+        Устаревшая схема ошибки: person-service её больше не отдаёт, ошибки описывает ProblemResponse.
+        Оставлена, чтобы контракт и person-client менялись только добавлением.
       required: [timestamp, path, status, error, message, traceId]
       properties:
         timestamp:

@@ -4,15 +4,15 @@
 
 ## Платформа
 
-Учебная платёжная платформа в монорепозитории. Модуль 1 закладывает внешний входной слой; следующие модули
-добавят person-service, transaction-service, payment-service, webhook-collector-service и notification-service.
+Учебная платёжная платформа в монорепозитории. Модуль 1 заложил внешний входной слой, модуль 2 — person-service;
+следующие модули добавят transaction-service, payment-service, webhook-collector-service и notification-service.
 
 ## Модули и ответственность
 
 | Модуль | Ответственность | Состояние |
 |---|---|---|
 | `individuals-api` | внешний входной слой: регистрация, вход, refresh, /me; оркестрация Keycloak и person-service; валидация токенов | реализован |
-| `person-service` | доменный пользователь, адрес, индивидуальные данные, транзакционный CRUD, аудит, миграции | контракт + миграции; реализация — модуль 2 |
+| `person-service` | доменный пользователь, адрес, индивидуальные данные, транзакционный CRUD, аудит, миграции | реализован |
 | `person-client` | HTTP Service Client и DTO person-service, сгенерированные из OpenAPI; публикуется как артефакт | реализован |
 
 ## Источники истины
@@ -38,6 +38,12 @@
    в следующих модулях.
 7. Пути `/api/v1/persons/registration`, `/api/v1/persons/{userUid}`, `/api/v1/persons/by-email` не переименовываются.
 8. Применённые миграции Flyway не редактируются — только новые `V00N__*.sql` поверх.
+9. Контракт person-service расширяется только добавлением операций и необязательных полей; любое другое изменение —
+   новая мажорная версия person-client. Опубликованные версии не перезаписываются.
+10. person-service не обращается к Keycloak и не знает про токены, пароли и роли. Колонка `users.keycloak_user_id` есть в V001,
+    но в JPA и API не отображается.
+11. Схема принадлежит Flyway (`ddl-auto=validate`), наружу выходят только DTO. Email хранится в нижнем регистре, уникальность
+    обеспечивает индекс `uk_users_email_lower`, а не проверка в коде.
 
 ## Устройство individuals-api
 
@@ -60,6 +66,22 @@
 на автоконфигурированном `WebClient.Builder`, поэтому получают метрики и передачу trace context;
 `PersonsApi` из person-client (с 2.0.0) возвращает `Mono`. Resource server — `SecurityWebFilterChain` и `ReactiveJwtDecoder`.
 
+## Устройство person-service
+
+Пакет `com.example.person`. Стек блокирующий: Spring MVC, Spring Data JPA, Hibernate, Envers. Граница с individuals-api — HTTP,
+поэтому разные модели потоков не конфликтуют.
+
+| Пакет | Содержимое |
+|---|---|
+| `api`, `api.model` | сгенерировано из `person-service.yaml` (контроллеры, `*ApiDelegate`, DTO) — не редактировать |
+| `controller` | `PersonsApiDelegateImpl`, `UsersApiDelegateImpl`: только DTO и заголовки |
+| `service` | `UserService` — правила агрегата и транзакции |
+| `repository`, `domain` | Spring Data JPA и сущности `users`, `addresses`, `individuals`, `countries` (только чтение) |
+| `mapper` | явное отображение Entity → DTO внутри транзакции |
+| `error` | каталог `ErrorCode`, `ProblemExceptionHandler` — единственное место записи ошибок в журнал |
+| `audit` | ревизионная сущность Envers с `trace_id` |
+| `metrics`, `logging`, `config` | счётчики и таймер, журнал запросов и MDC, запрет `null` в обязательных полях PATCH |
+
 ## Keycloak
 
 Realm `payment-platform` (`realm-export.json`): confidential client `individuals-api`
@@ -72,7 +94,7 @@ mapper атрибута `user_uid` в access/id token и userinfo, realm-рол�
 
 ## Технологии
 
-Java 25, Spring Boot 4.1 (Spring Framework 7, WebFlux, Jackson 3), Gradle 9 (Kotlin DSL, общий version catalog),
+Java 25, Spring Boot 4.0 (Spring Framework 7, WebFlux в individuals-api, MVC + JPA + Envers в person-service, Jackson 3), Gradle 9 (Kotlin DSL, общий version catalog),
 OpenAPI Generator 7.26 (`spring` / `spring-http-interface`, `useSpringBoot4`, `useJackson3`, `reactive`), Keycloak 26.8,
 Micrometer + OpenTelemetry, Prometheus, Tempo, Grafana, Testcontainers 2, WireMock 3, JaCoCo, Flyway, PostgreSQL 18.
 
@@ -86,3 +108,12 @@ Micrometer + OpenTelemetry, Prometheus, Tempo, Grafana, Testcontainers 2, WireMo
   с `UnsupportedOperationException: ByteBuffer derived from closeable shared sessions not supported`.
 - traceId/spanId в MDC восстанавливаются из Reactor Context (`spring.reactor.context-propagation=auto`); traceId в
   `ErrorResponse` берётся из наблюдения HTTP-запроса, привязанного к exchange.
+- Счётчик созданных пользователей называется `person.users.creations`, а не `person.users.created`: суффикс `_created` зарезервирован
+  OpenMetrics, клиент Prometheus молча срезает его, и метрика становится `person_users_total`.
+- Генератор: `delegatePattern` работает только без `interfaceOnly`, поэтому контроллеры тоже генерируются. Параметры запроса проверяет
+  `@Validated` через AOP, так что ошибка приходит как `ConstraintViolationException`, а не `HandlerMethodValidationException`.
+- В PATCH отсутствующее поле и `null` в сгенерированной модели неотличимы. Обязательные поля отвергают `null` через Jackson-миксины
+  (`RequiredFieldsJackson`); `null` в необязательном поле равнозначен его отсутствию.
+- Удаление идёт каскадами JPA, а не `ON DELETE CASCADE`: каскад в БД не оставил бы ревизии DEL у individual.
+- Правка адреса или individual обновляет и `users.updated_at`: иначе версия пользователя в `ETag` не росла бы.
+- В `eclipse-temurin:25-jre` нет `wget` и `curl`: healthcheck person-service написан на `bash` и `/dev/tcp`.
